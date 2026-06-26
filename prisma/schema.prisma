@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id              Int      @id @default(autoincrement())
+  name            String
+  phone           String   @unique
+  password        String
+  role            String   @default("customer")
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  assignedTickets Ticket[] @relation("AssignedTickets")
+}
+
+model Ticket {
+  id           Int         @id @default(autoincrement())
+  ticketNo     String      @unique
+  customer     String
+  contact      String
+  phone        String
+  device       String
+  project      String
+  type         String
+  level        String
+  status       String      @default("待处理")
+  description  String
+  expectedAt   DateTime?
+  attachments  String      @default("[]")
+  rating       Int?
+  assignedTo   Int?
+  assignedAt   DateTime?
+  assignedUser User?       @relation("AssignedTickets", fields: [assignedTo], references: [id])
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  logs         TicketLog[]
+}
+
+model TicketLog {
+  id        Int      @id @default(autoincrement())
+  ticketId  Int
+  oldStatus String
+  newStatus String
+  operator  String
+  remark    String
+  createdAt DateTime @default(now())
+
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+}
+
+
+model Faq {
+  id        Int      @id @default(autoincrement())
+  question  String
+  answer    String
+  category  String
+  sortOrder Int      @default(0)
+  isActive   Boolean  @default(true)
+  clickCount Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Video {
+  id          Int      @id @default(autoincrement())
+  title       String
+  category    String
+  fileUrl     String
+  description String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

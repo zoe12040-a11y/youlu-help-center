@@ -1,0 +1,47 @@
+# Dependencies
+node_modules
+
+# Environment variables (contains Supabase credentials - never commit!)
+.env
+.env.local
+.env*.local
+
+# Next.js build output
+.next
+out
+
+# Prisma local database files (SQLite - not needed for PostgreSQL deployment)
+prisma/dev.db
+prisma/dev.db-journal
+prisma/*.db
+prisma/*.db-journal
+prisma/broken-db-backup/
+
+# Vercel
+.vercel
+
+# Prisma generated client (re-generated at build time)
+/app/generated/prisma
+
+# Video files (too large for git — re-upload via admin panel on production)
+public/videos/
+
+# User uploaded files (stored on server, not in git)
+public/uploads/
+
+# Local SQLite database (root level)
+dev.db
+dev.db-journal
+*.db
+*.db-journal
+
+# Claude Code workspace files
+.claude/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
