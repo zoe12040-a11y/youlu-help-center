@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { ossPresignedPutUrl, ossPublicUrl } from "../../../../lib/oss";
 
-/** GET /api/videos/presign — Health check, visible in browser */
+/** GET /api/videos/presign — Health check */
 export async function GET() {
   return NextResponse.json({
     route: "ok",
@@ -22,9 +22,10 @@ const ACCEPTED_VIDEO_TYPES = new Set([
 
 /** POST /api/videos/presign */
 export async function POST(request: Request) {
-  console.log("[presign/videos] ENV:", {
-    region:    process.env.OSS_REGION    ?? "MISSING",
-    bucket:    process.env.OSS_BUCKET    ?? "MISSING",
+  // ── 1. ENV check (exact format requested) ─────────────────────────────────
+  console.log("ENV check:", {
+    region:    process.env.OSS_REGION,
+    bucket:    process.env.OSS_BUCKET,
     hasKey:    !!process.env.OSS_ACCESS_KEY_ID,
     hasSecret: !!process.env.OSS_ACCESS_KEY_SECRET,
   });
@@ -38,15 +39,17 @@ export async function POST(request: Request) {
 
   if (missingVars.length > 0) {
     const msg = `服务器缺少环境变量：${missingVars.join(", ")}`;
-    console.error("[presign/videos]", msg);
+    console.error("[presign] ❌ missing env vars:", missingVars);
     return NextResponse.json({ success: false, message: msg }, { status: 500 });
   }
 
+  // ── 2. Parse request body ─────────────────────────────────────────────────
   let filename = "", contentType = "";
   try {
     const body = await request.json();
     filename    = body.filename    ?? "";
     contentType = body.contentType ?? "";
+    console.log("[presign] request body:", { filename, contentType });
   } catch {
     return NextResponse.json({ success: false, message: "请求体必须是 JSON" }, { status: 400 });
   }
@@ -60,30 +63,31 @@ export async function POST(request: Request) {
     /\.(mp4|mov|avi|webm|ogv|3gp|3g2)$/i.test(filename);
 
   if (!validType) {
+    console.error("[presign] ❌ unsupported type:", contentType, filename);
     return NextResponse.json(
       { success: false, message: `不支持的文件类型：${contentType || "unknown"}（${filename}）` },
       { status: 400 }
     );
   }
 
+  // ── 3. Generate presigned URL ─────────────────────────────────────────────
   const cleanName = filename.replace(/[^\w\-._]/g, "_");
   const objectKey = `tutorials/${Date.now()}-${cleanName}`;
+  console.log("[presign] objectKey:", objectKey);
 
   try {
-    // ossPresignedPutUrl now uses Web Crypto (no url.parse deprecation warning)
-    const uploadUrl = await ossPresignedPutUrl(objectKey, contentType, 3600);
-    const publicUrl = ossPublicUrl(objectKey);
+    const presignUrl = await ossPresignedPutUrl(objectKey, contentType, 3600);
+    const publicUrl  = ossPublicUrl(objectKey);
 
-    // Log first 80 chars of URL (confirms signing worked, keeps secret safe)
-    console.log("[presign/videos] ✅ success");
-    console.log("[presign/videos] objectKey:", objectKey);
-    console.log("[presign/videos] uploadUrl prefix:", uploadUrl.slice(0, 80) + "...");
-    console.log("[presign/videos] publicUrl:", publicUrl);
+    // ── Full URL logged for debugging (valid for 1h, safe to log) ───────────
+    console.log("Generated presign URL:", presignUrl);
+    console.log("[presign] publicUrl:", publicUrl);
+    console.log("[presign] ✅ returning success to client");
 
-    return NextResponse.json({ success: true, uploadUrl, objectKey, publicUrl });
+    return NextResponse.json({ success: true, uploadUrl: presignUrl, objectKey, publicUrl });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[presign/videos] ❌ signing failed:", msg);
+    console.error("[presign] ❌ signing error:", msg);
     return NextResponse.json({ success: false, message: `生成签名失败：${msg}` }, { status: 500 });
   }
 }
