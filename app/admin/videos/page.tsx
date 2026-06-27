@@ -13,9 +13,7 @@ type Video = {
 
 type UploadPhase = "idle" | "presigning" | "uploading" | "confirming" | "done" | "error";
 
-// PUT to OSS with full debug logging
-// Using fetch (not XHR) for cleaner error messages during debugging.
-// Progress tracking removed temporarily to diagnose the upload failure.
+// PUT file directly to OSS presigned URL
 async function putToOSS(
   presignUrl: string,
   file: File,
@@ -26,22 +24,41 @@ async function putToOSS(
   console.log("file:", { name: file.name, size: file.size, type: file.type });
   console.log("Content-Type header:", contentType);
 
-  // Only set Content-Type — no Authorization, no extra headers
-  // OSS presigned URL handles auth via query params (OSSAccessKeyId + Signature)
-  const uploadRes = await fetch(presignUrl, {
-    method: "PUT",
-    body: file,
-    headers: {
-      "Content-Type": contentType,
-    },
-  });
+  let uploadRes: Response;
+  try {
+    // Only Content-Type header — OSS auth is in the query params of the presigned URL
+    uploadRes = await fetch(presignUrl, {
+      method: "PUT",
+      body: file,
+      headers: { "Content-Type": contentType },
+    });
+  } catch (networkErr) {
+    // fetch() throws TypeError when:
+    //  1. True network failure (no internet)
+    //  2. CORS blocked — often because OSS returned 403 without CORS headers
+    //     (happens when the request signature is wrong or bucket ACL denies access)
+    const raw = networkErr instanceof Error ? networkErr.message : String(networkErr);
+    console.error("Upload network error:", raw);
+    throw new Error(
+      `PUT 请求被阻止（${raw}）。\n` +
+      "可能原因：\n" +
+      "① OSS CORS 未正确配置（需允许 PUT 方法）\n" +
+      "② 签名错误（OSS 返回 403 但浏览器无法读取响应）\n" +
+      "请打开 F12 → Network 找到 PUT 请求，查看实际状态码。"
+    );
+  }
 
   console.log("upload status:", uploadRes.status, uploadRes.statusText);
   const text = await uploadRes.text();
   console.log("upload response:", text);
 
   if (!uploadRes.ok) {
-    throw new Error(`OSS 返回 ${uploadRes.status} ${uploadRes.statusText}：${text.slice(0, 300)}`);
+    // Parse OSS error XML for a clear message
+    const codeMatch = text.match(/<Code>([^<]+)<\/Code>/);
+    const msgMatch  = text.match(/<Message>([^<]+)<\/Message>/);
+    const ossCode   = codeMatch?.[1] ?? "Unknown";
+    const ossMsg    = msgMatch?.[1]  ?? text.slice(0, 200);
+    throw new Error(`OSS 错误 ${uploadRes.status} [${ossCode}]：${ossMsg}`);
   }
 }
 
