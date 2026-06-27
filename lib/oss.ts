@@ -38,10 +38,11 @@ export function ossPublicUrl(objectKey: string): string {
     : `https://${bucket}.${region}.aliyuncs.com/${objectKey}`;
 }
 
-// ── Presigned PUT URL ─────────────────────────────────────────────────────────
-// Generates a signed URL that allows a browser to PUT directly to OSS.
-// The Content-Type is included in the signature, so the browser MUST send
-// the same Content-Type header in the PUT request.
+// ── Presigned PUT URL (manual V1 signature — avoids ali-oss url.parse warning) ─
+//
+// Implements OSS Signature V1 using Web Crypto API (works in Node.js & Edge).
+// Does NOT use ali-oss's signatureUrl(), which internally calls url.parse()
+// and triggers [DEP0169] in Node.js 22+.
 //
 // ⚠️  OSS CORS requirement: configure your OSS bucket CORS rules to allow:
 //    - Allowed Origins: your Vercel domain (or * for testing)
@@ -49,18 +50,38 @@ export function ossPublicUrl(objectKey: string): string {
 //    - Allowed Headers: *
 //    OSS Console → Bucket → Security → CORS Rules → Add Rule
 
-export function ossPresignedPutUrl(
+export async function ossPresignedPutUrl(
   objectKey: string,
-  contentType: string,
+  _contentType: string,   // kept for API compatibility; not included in sig
   expiresSeconds = 3600
-): string {
-  const client = getOSSClient();
-  // signatureUrl() runs on the server and uses the secret key — never exposed to client
-  return client.signatureUrl(objectKey, {
-    expires: expiresSeconds,
-    method: "PUT",
-    "Content-Type": contentType,
-  } as Parameters<OSS["signatureUrl"]>[1]);
+): Promise<string> {
+  const region    = process.env.OSS_REGION!;
+  const bucket    = process.env.OSS_BUCKET!;
+  const keyId     = process.env.OSS_ACCESS_KEY_ID!;
+  const keySecret = process.env.OSS_ACCESS_KEY_SECRET!;
+
+  const expires = Math.floor(Date.now() / 1000) + expiresSeconds;
+
+  // OSS V1 StringToSign: Method\nContent-MD5\nContent-Type\nExpires\nCanonicalizedResource
+  // We omit Content-MD5 and Content-Type so the browser can PUT freely.
+  const stringToSign = `PUT\n\n\n${expires}\n/${bucket}/${objectKey}`;
+
+  // HMAC-SHA1 via Web Crypto (no url.parse, no Node.js-specific types)
+  const enc = new TextEncoder();
+  const cryptoKey = await globalThis.crypto.subtle.importKey(
+    "raw", enc.encode(keySecret),
+    { name: "HMAC", hash: "SHA-1" },
+    false, ["sign"]
+  );
+  const sigBuf = await globalThis.crypto.subtle.sign("HMAC", cryptoKey, enc.encode(stringToSign));
+  const signature = btoa(String.fromCharCode(...new Uint8Array(sigBuf)));
+
+  const qs = `OSSAccessKeyId=${encodeURIComponent(keyId)}&Expires=${expires}&Signature=${encodeURIComponent(signature)}`;
+  const endpoint = process.env.OSS_CUSTOM_DOMAIN
+    ? `https://${process.env.OSS_CUSTOM_DOMAIN}`
+    : `https://${bucket}.${region}.aliyuncs.com`;
+
+  return `${endpoint}/${objectKey}?${qs}`;
 }
 
 // ── Server-side upload (fallback for small files / internal use) ──────────────

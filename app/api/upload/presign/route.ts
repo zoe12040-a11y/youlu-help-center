@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getOSSClient, ossPublicUrl } from "../../../../lib/oss";
+import { ossPresignedPutUrl, ossPublicUrl } from "../../../../lib/oss";
 
 const IMAGE_MAX = 20 * 1024 * 1024;   // 20 MB
 const VIDEO_MAX = 500 * 1024 * 1024;  // 500 MB
@@ -65,9 +65,8 @@ export async function POST(request: Request) {
     const rand      = Math.random().toString(36).slice(2, 8);
     const objectKey = `tickets/${Date.now()}-${rand}${safeExt}`;
 
-    // Use signatureUrl directly (no Content-Type in signature for compatibility)
-    const client = getOSSClient();
-    const uploadUrl = client.signatureUrl(objectKey, { expires: 3600, method: "PUT" });
+    // ossPresignedPutUrl uses Web Crypto (no url.parse deprecation)
+    const uploadUrl = await ossPresignedPutUrl(objectKey, resolvedType, 3600);
     const publicUrl = ossPublicUrl(objectKey);
 
     return NextResponse.json({ success: true, uploadUrl, objectKey, publicUrl, fileType });
