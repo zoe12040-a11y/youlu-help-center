@@ -1,8 +1,8 @@
-import { getVideosBySlug } from "../../../lib/getVideos";
+import { prisma } from "../../../lib/prisma";
 import HelpfulFeedback from "../_components/HelpfulFeedback";
 
-export default function TutorialStartPage() {
-  const videos = getVideosBySlug("start");
+export default async function TutorialStartPage() {
+  const videos = await prisma.video.findMany({ where: { category: "开机部署" }, orderBy: { createdAt: "asc" } });
 
   return (
     <main className="min-h-screen bg-slate-100 px-6 py-10 text-slate-900">

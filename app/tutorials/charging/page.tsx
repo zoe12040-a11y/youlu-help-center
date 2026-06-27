@@ -1,8 +1,8 @@
-import { getVideosBySlug } from "../../../lib/getVideos";
+import { prisma } from "../../../lib/prisma";
 import HelpfulFeedback from "../_components/HelpfulFeedback";
 
-export default function TutorialChargingPage() {
-  const videos = getVideosBySlug("charging");
+export default async function TutorialChargingPage() {
+  const videos = await prisma.video.findMany({ where: { category: "充电操作" }, orderBy: { createdAt: "asc" } });
 
   return (
     <main className="min-h-screen bg-slate-100 px-6 py-10 text-slate-900">

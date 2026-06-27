@@ -82,8 +82,12 @@ export default function TutorialsPage() {
     return videos;
   })();
 
-  // All categories from DB for the dropdown
-  const allCategories = Array.from(new Set(videos.map((v) => v.category))).sort();
+  // Always show 6 primary categories + any extra categories from DB
+  const PRIMARY_CATEGORY_NAMES = PRIMARY_CARDS.map((c) => c.dbCategory);
+  const dbOnlyCategories = Array.from(new Set(videos.map((v) => v.category)))
+    .filter((c) => !PRIMARY_CATEGORY_NAMES.includes(c))
+    .sort();
+  const allCategories = [...PRIMARY_CATEGORY_NAMES, ...dbOnlyCategories];
 
   function selectCategory(cat: string) {
     setActiveCategory(cat);
