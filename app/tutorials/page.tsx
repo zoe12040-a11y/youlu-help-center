@@ -39,6 +39,25 @@ export default function TutorialsPage() {
   const [activeCategory, setActiveCategory] = useState("全部");
   const [playingId, setPlayingId] = useState<number | null>(null);
   const videoRefs = useRef<Record<number, HTMLVideoElement | null>>({});
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  useEffect(() => {
+    const user = JSON.parse(localStorage.getItem("youlu_user") || "{}");
+    setIsAdmin(user.role === "admin");
+  }, []);
+
+  async function adminDeleteVideo(id: number, title: string) {
+    if (!confirm(`确认删除视频「${title}」？\n将同时删除 OSS 文件，无法恢复。`)) return;
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/videos/${id}`, { method: "DELETE" });
+      const r   = await res.json();
+      if (r.success) { setVideos((prev) => prev.filter((v) => v.id !== id)); }
+      else alert(`删除失败：${r.message}`);
+    } catch { alert("删除失败，请检查网络"); }
+    setDeletingId(null);
+  }
 
   async function loadData() {
     setLoading(true);
@@ -305,13 +324,25 @@ export default function TutorialsPage() {
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {displayVideos.map((video) => (
-                  <VideoCard
-                    key={video.id}
-                    video={video}
-                    isPlaying={playingId === video.id}
-                    onPlay={() => handlePlay(video.id)}
-                    videoRef={(el) => { videoRefs.current[video.id] = el; }}
-                  />
+                  <div key={video.id} className="relative">
+                    <VideoCard
+                      video={video}
+                      isPlaying={playingId === video.id}
+                      onPlay={() => handlePlay(video.id)}
+                      videoRef={(el) => { videoRefs.current[video.id] = el; }}
+                    />
+                    {/* Admin-only delete button */}
+                    {isAdmin && (
+                      <button
+                        onClick={() => adminDeleteVideo(video.id, video.title)}
+                        disabled={deletingId === video.id}
+                        className="absolute right-2 top-2 z-10 rounded-lg bg-red-600 px-2 py-1 text-xs font-bold text-white opacity-80 hover:opacity-100 disabled:opacity-40"
+                        title="管理员删除"
+                      >
+                        {deletingId === video.id ? "删除中" : "🗑️"}
+                      </button>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
