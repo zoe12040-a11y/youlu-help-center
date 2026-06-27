@@ -4,10 +4,10 @@
   "regions": ["sin1"],
   "functions": {
     "app/api/videos/upload/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 60
     },
     "app/api/upload/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 60
     }
   }
 }

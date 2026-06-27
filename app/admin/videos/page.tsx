@@ -11,65 +11,12 @@ type Video = {
   createdAt: string;
 };
 
-type UploadPhase = "idle" | "presigning" | "uploading" | "confirming" | "done" | "error";
-
-// PUT file directly to OSS presigned URL
-async function putToOSS(
-  presignUrl: string,
-  file: File,
-  contentType: string,
-  _onProgress: (pct: number) => void
-): Promise<void> {
-  console.log("uploading to:", presignUrl);
-  console.log("file:", { name: file.name, size: file.size, type: file.type });
-  console.log("Content-Type header:", contentType);
-
-  let uploadRes: Response;
-  try {
-    // Only Content-Type header — OSS auth is in the query params of the presigned URL
-    uploadRes = await fetch(presignUrl, {
-      method: "PUT",
-      body: file,
-      headers: { "Content-Type": contentType },
-    });
-  } catch (networkErr) {
-    // fetch() throws TypeError when:
-    //  1. True network failure (no internet)
-    //  2. CORS blocked — often because OSS returned 403 without CORS headers
-    //     (happens when the request signature is wrong or bucket ACL denies access)
-    const raw = networkErr instanceof Error ? networkErr.message : String(networkErr);
-    console.error("Upload network error:", raw);
-    throw new Error(
-      `PUT 请求被阻止（${raw}）。\n` +
-      "可能原因：\n" +
-      "① OSS CORS 未正确配置（需允许 PUT 方法）\n" +
-      "② 签名错误（OSS 返回 403 但浏览器无法读取响应）\n" +
-      "请打开 F12 → Network 找到 PUT 请求，查看实际状态码。"
-    );
-  }
-
-  console.log("upload status:", uploadRes.status, uploadRes.statusText);
-  const text = await uploadRes.text();
-  console.log("upload response:", text);
-
-  if (!uploadRes.ok) {
-    // Parse OSS error XML for a clear message
-    const codeMatch = text.match(/<Code>([^<]+)<\/Code>/);
-    const msgMatch  = text.match(/<Message>([^<]+)<\/Message>/);
-    const ossCode   = codeMatch?.[1] ?? "Unknown";
-    const ossMsg    = msgMatch?.[1]  ?? text.slice(0, 200);
-    throw new Error(`OSS 错误 ${uploadRes.status} [${ossCode}]：${ossMsg}`);
-  }
-}
-
 export default function AdminVideosPage() {
   const [checkedLogin, setCheckedLogin] = useState(false);
   const [videos, setVideos] = useState<Video[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const [uploadPhase, setUploadPhase] = useState<UploadPhase>("idle");
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadMessage, setUploadMessage] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState<{ success: boolean; message: string } | null>(null);
 
   const [form, setForm] = useState({ title: "", category: "", description: "" });
   const fileRef = useRef<HTMLInputElement>(null);
@@ -95,86 +42,48 @@ export default function AdminVideosPage() {
     loadVideos();
   }, []);
 
-  // ── Three-step presigned upload ───────────────────────────────────────────
-
+  // ── Server-side upload (browser → POST to our API → API uploads to OSS) ──
+  // This avoids CORS issues with direct OSS PUT entirely.
   async function uploadVideo() {
     const file = fileRef.current?.files?.[0];
     if (!form.title.trim()) { alert("请填写视频标题"); return; }
-    if (!file) { alert("请选择要上传的视频文件"); return; }
+    if (!file)               { alert("请选择要上传的视频文件"); return; }
 
-    setUploadPhase("presigning");
-    setUploadProgress(0);
-    setUploadMessage("正在获取上传凭证...");
+    setUploading(true);
+    setUploadResult(null);
+
+    console.log("[upload] sending to /api/videos/upload:", {
+      name: file.name, size: file.size, type: file.type,
+    });
 
     try {
-      // Step 1: Get presigned URL
-      const presignRes = await fetch("/api/videos/presign", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filename: file.name,
-          contentType: file.type || "video/mp4",
-        }),
-      });
+      const data = new FormData();
+      data.append("title",       form.title);
+      data.append("category",    form.category || "未分类");
+      data.append("description", form.description);
+      data.append("file",        file);
 
-      // Always check HTTP status before parsing JSON
-      // (Vercel may return an HTML error page on 500, causing json() to throw)
-      let presign: { success: boolean; message?: string; uploadUrl?: string; objectKey?: string };
-      if (!presignRes.ok) {
-        let detail = `HTTP ${presignRes.status}`;
-        try { const j = await presignRes.json(); detail = j.message ?? detail; } catch { /* ignore */ }
-        throw new Error(`获取上传凭证失败（${detail}）`);
+      const res    = await fetch("/api/videos/upload", { method: "POST", body: data });
+      const result = await res.json();
+
+      console.log("[upload] response:", result);
+
+      if (result.success) {
+        setUploadResult({ success: true, message: `上传成功！${result.data?.fileUrl ?? ""}` });
+        setForm({ title: "", category: "", description: "" });
+        if (fileRef.current) fileRef.current.value = "";
+        await loadVideos();
+      } else {
+        setUploadResult({ success: false, message: result.message || "上传失败，请稍后重试" });
       }
-      presign = await presignRes.json();
-      if (!presign.success) throw new Error(presign.message || "获取上传凭证失败");
-
-      const { uploadUrl, objectKey } = presign as { uploadUrl: string; objectKey: string };
-      const resolvedType = (file.type && file.type !== "application/octet-stream")
-        ? file.type : "video/mp4";
-
-      // Step 2: PUT directly to OSS
-      setUploadPhase("uploading");
-      setUploadMessage(`正在上传「${file.name}」（${(file.size / 1024 / 1024).toFixed(1)} MB）...`);
-
-      await putToOSS(uploadUrl, file, resolvedType, (pct) => {
-        setUploadProgress(pct);
-        setUploadMessage(`上传中 ${pct}%...`);
-      });
-
-      // Step 3: Confirm to DB
-      setUploadPhase("confirming");
-      setUploadMessage("正在写入数据库...");
-      setUploadProgress(100);
-
-      const confirmRes = await fetch("/api/videos/confirm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          objectKey,
-          title: form.title,
-          category: form.category || "未分类",
-          description: form.description,
-        }),
-      });
-      const confirm = await confirmRes.json();
-      if (!confirm.success) throw new Error(confirm.message || "写入数据库失败");
-
-      setUploadPhase("done");
-      setUploadMessage("✅ 视频上传成功！");
-      setForm({ title: "", category: "", description: "" });
-      if (fileRef.current) fileRef.current.value = "";
-      await loadVideos();
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.error("[uploadVideo]", msg);
-      setUploadPhase("error");
-      setUploadMessage(`❌ ${msg}`);
+    } catch (e) {
+      console.error("[upload] fetch error:", e);
+      const msg = e instanceof Error ? e.message : String(e);
+      setUploadResult({ success: false, message: `上传失败：${msg}` });
     }
+
+    setUploading(false);
   }
-
-  const uploading = uploadPhase === "presigning" || uploadPhase === "uploading" || uploadPhase === "confirming";
-
-  // ── Delete ────────────────────────────────────────────────────────────────
 
   async function deleteVideo(id: number, title: string) {
     if (!confirm(`确定要删除视频「${title}」吗？`)) return;
@@ -210,7 +119,7 @@ export default function AdminVideosPage() {
           <p className="text-sm text-slate-400">后台管理 / 视频素材管理</p>
           <h1 className="mt-4 text-2xl font-bold text-blue-700 md:text-3xl">视频素材管理</h1>
           <p className="mt-2 text-sm text-slate-500">
-            视频直接上传到阿里云 OSS，支持大文件，不受服务器超时限制。
+            视频通过服务器上传到阿里云 OSS，上传后立即在教程页显示。
           </p>
           <div className="mt-5 flex flex-wrap gap-3">
             <a href="/admin" className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-bold text-slate-700">
@@ -226,112 +135,71 @@ export default function AdminVideosPage() {
         <div className="rounded-3xl bg-white p-5 shadow-sm md:p-8">
           <h2 className="text-lg font-bold text-slate-900 md:text-xl">上传新视频</h2>
 
-          {/* Result / progress */}
-          {uploadPhase !== "idle" && (
-            <div className={`mt-5 rounded-2xl p-4 ${
-              uploadPhase === "done"  ? "bg-green-50"
-              : uploadPhase === "error" ? "bg-red-50"
-              : "bg-blue-50"
-            }`}>
-              <p className={`text-sm font-bold ${
-                uploadPhase === "done"  ? "text-green-700"
-                : uploadPhase === "error" ? "text-red-700"
-                : "text-blue-700"
-              }`}>
-                {uploadMessage}
+          {uploadResult && (
+            <div className={`mt-5 rounded-2xl p-4 ${uploadResult.success ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+              <p className="text-sm font-bold">{uploadResult.success ? "✅" : "❌"} {uploadResult.message}</p>
+            </div>
+          )}
+
+          <div className="mt-6 grid gap-5 md:grid-cols-2">
+            <div>
+              <label className="text-sm font-bold text-slate-700">视频标题 *</label>
+              <input
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+                placeholder="例如：开机操作教程"
+                className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-bold text-slate-700">分类</label>
+              <input
+                value={form.category}
+                onChange={(e) => setForm({ ...form, category: e.target.value })}
+                placeholder="例如：开机部署"
+                className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="text-sm font-bold text-slate-700">描述（可选）</label>
+              <input
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder="简短描述视频内容..."
+                className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="text-sm font-bold text-slate-700">选择视频文件</label>
+              <p className="mt-1 text-xs text-slate-400">
+                支持 mp4、mov、avi 等格式，手机可从相册选择
               </p>
-
-              {uploadPhase === "uploading" && (
-                <div className="mt-3">
-                  <div className="h-2.5 w-full rounded-full bg-blue-100">
-                    <div
-                      className="h-2.5 rounded-full bg-blue-500 transition-all duration-200"
-                      style={{ width: `${uploadProgress}%` }}
-                    />
-                  </div>
-                  <p className="mt-1 text-right text-xs text-blue-500">{uploadProgress}%</p>
-                </div>
-              )}
-
-              {uploadPhase === "done" && (
-                <button
-                  onClick={() => { setUploadPhase("idle"); setUploadMessage(""); }}
-                  className="mt-3 text-xs font-bold text-green-600 underline"
-                >
-                  继续上传
-                </button>
-              )}
+              <input
+                ref={fileRef}
+                type="file"
+                accept="video/mp4,video/quicktime,video/avi,video/x-msvideo,video/webm,video/3gpp,video/3gpp2,video/*,.mp4,.mov,.avi,.webm,.3gp"
+                className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:font-bold file:text-blue-600"
+              />
             </div>
-          )}
+          </div>
 
-          {(uploadPhase === "idle" || uploadPhase === "error" || uploadPhase === "done") && (
-            <div className="mt-6 grid gap-5 md:grid-cols-2">
-              <div>
-                <label className="text-sm font-bold text-slate-700">视频标题 *</label>
-                <input
-                  value={form.title}
-                  onChange={(e) => setForm({ ...form, title: e.target.value })}
-                  placeholder="例如：开机操作教程"
-                  className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-bold text-slate-700">分类</label>
-                <input
-                  value={form.category}
-                  onChange={(e) => setForm({ ...form, category: e.target.value })}
-                  placeholder="例如：开机部署"
-                  className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="text-sm font-bold text-slate-700">描述（可选）</label>
-                <input
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  placeholder="简短描述视频内容..."
-                  className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="text-sm font-bold text-slate-700">选择视频文件</label>
-                <p className="mt-1 text-xs text-slate-400">
-                  支持 mp4、mov、avi 等格式，支持 100 MB 以上大文件，手机可从相册选择
-                </p>
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept="video/mp4,video/quicktime,video/avi,video/x-msvideo,video/webm,video/3gpp,video/3gpp2,video/*,.mp4,.mov,.avi,.webm,.3gp"
-                  className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:font-bold file:text-blue-600"
-                />
-              </div>
-            </div>
-          )}
-
-          {(uploadPhase === "idle" || uploadPhase === "error") && (
-            <div className="mt-5">
-              <button
-                onClick={uploadVideo}
-                disabled={uploading}
-                className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white disabled:bg-slate-400"
-              >
-                上传视频
-              </button>
-            </div>
-          )}
-
-          {uploading && (
-            <div className="mt-5">
-              <button disabled className="rounded-xl bg-slate-400 px-6 py-3 text-sm font-bold text-white">
-                {uploadPhase === "presigning" ? "获取凭证中..." :
-                 uploadPhase === "uploading"  ? `上传中 ${uploadProgress}%...` :
-                 "写入数据库中..."}
-              </button>
-            </div>
-          )}
+          <div className="mt-5">
+            <button
+              onClick={uploadVideo}
+              disabled={uploading}
+              className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white disabled:bg-slate-400"
+            >
+              {uploading ? "上传中（请勿关闭页面）..." : "上传视频"}
+            </button>
+            {uploading && (
+              <p className="mt-2 text-xs text-slate-400">
+                视频正在通过服务器上传到 OSS，文件越大等待时间越长，请耐心等待。
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Video list */}
