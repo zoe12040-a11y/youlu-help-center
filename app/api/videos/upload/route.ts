@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import OSS from "ali-oss";
+import { ossUpload, ossPublicUrl } from "../../../../lib/oss";
 import { prisma } from "../../../../lib/prisma";
 
-const ACCEPTED_VIDEO_TYPES = [
+const ACCEPTED_VIDEO_TYPES = new Set([
   "video/mp4",
   "video/quicktime",
   "video/avi",
@@ -11,44 +11,28 @@ const ACCEPTED_VIDEO_TYPES = [
   "video/ogg",
   "video/3gpp",
   "video/3gpp2",
-  "application/octet-stream",
-];
-
-function getOSSClient() {
-  const region = process.env.OSS_REGION;
-  const accessKeyId = process.env.OSS_ACCESS_KEY_ID;
-  const accessKeySecret = process.env.OSS_ACCESS_KEY_SECRET;
-  const bucket = process.env.OSS_BUCKET;
-
-  if (!region || !accessKeyId || !accessKeySecret || !bucket) {
-    const missing = [
-      !region && "OSS_REGION",
-      !accessKeyId && "OSS_ACCESS_KEY_ID",
-      !accessKeySecret && "OSS_ACCESS_KEY_SECRET",
-      !bucket && "OSS_BUCKET",
-    ]
-      .filter(Boolean)
-      .join(", ");
-    throw new Error(`缺少阿里云 OSS 环境变量：${missing}`);
-  }
-
-  return new OSS({ region, accessKeyId, accessKeySecret, bucket });
-}
-
-/** Build the public URL for an uploaded object */
-function buildOSSUrl(objectKey: string): string {
-  const bucket = process.env.OSS_BUCKET!;
-  const region = process.env.OSS_REGION!;
-  // Custom domain takes priority; falls back to default OSS endpoint
-  const customDomain = process.env.OSS_CUSTOM_DOMAIN;
-  if (customDomain) return `https://${customDomain}/${objectKey}`;
-  // Default: https://BUCKET.REGION.aliyuncs.com/KEY
-  return `https://${bucket}.${region}.aliyuncs.com/${objectKey}`;
-}
+  "application/octet-stream", // some mobile browsers
+]);
 
 export async function POST(request: Request) {
+  // Guard: check OSS env vars before touching file data
+  const missing = [
+    !process.env.OSS_REGION          && "OSS_REGION",
+    !process.env.OSS_ACCESS_KEY_ID     && "OSS_ACCESS_KEY_ID",
+    !process.env.OSS_ACCESS_KEY_SECRET && "OSS_ACCESS_KEY_SECRET",
+    !process.env.OSS_BUCKET            && "OSS_BUCKET",
+  ].filter(Boolean);
+
+  if (missing.length > 0) {
+    console.error("[video-upload] Missing OSS env:", missing.join(", "));
+    return NextResponse.json(
+      { success: false, message: `服务器配置错误：缺少环境变量 ${missing.join(", ")}` },
+      { status: 500 }
+    );
+  }
+
   try {
-    const formData = await request.formData();
+    const formData    = await request.formData();
     const title       = String(formData.get("title")       || "");
     const category    = String(formData.get("category")    || "未分类");
     const description = String(formData.get("description") || "");
@@ -61,53 +45,28 @@ export async function POST(request: Request) {
       );
     }
 
-    const isVideoByMime = ACCEPTED_VIDEO_TYPES.includes(file.type);
-    const isVideoByName = /\.(mp4|mov|avi|webm|ogv|3gp|3g2)$/i.test(file.name);
-    if (!isVideoByMime && !isVideoByName) {
+    const validType =
+      ACCEPTED_VIDEO_TYPES.has(file.type) ||
+      /\.(mp4|mov|avi|webm|ogv|3gp|3g2)$/i.test(file.name);
+
+    if (!validType) {
       return NextResponse.json(
         { success: false, message: `不支持的文件类型：${file.type || "unknown"}（${file.name}）` },
         { status: 400 }
       );
     }
 
-    console.log(`[video-upload-oss] size=${file.size} type=${file.type} name=${file.name}`);
+    console.log(`[video-upload] size=${file.size} type=${file.type} name=${file.name}`);
 
-    const buffer = Buffer.from(await file.arrayBuffer());
+    const bytes = new Uint8Array(await file.arrayBuffer());
 
-    // OSS object key: tutorials/timestamp-safename.ext
+    // Build OSS object key — sanitise filename to ASCII-safe characters
     const cleanName = file.name.replace(/[^\w\-._]/g, "_");
     const objectKey = `tutorials/${Date.now()}-${cleanName}`;
 
-    let client: OSS;
-    try {
-      client = getOSSClient();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error("[video-upload-oss] Config error:", msg);
-      return NextResponse.json({ success: false, message: msg }, { status: 500 });
-    }
-
-    // Upload to OSS — supports files of any size
-    const result = await client.put(objectKey, buffer, {
-      mime: file.type || "video/mp4",
-      headers: {
-        "Content-Type": file.type || "video/mp4",
-        // Allow public read via bucket ACL; or use signed URL if bucket is private
-        "x-oss-object-acl": "public-read",
-      },
-    });
-
-    if (!result || result.res?.status >= 400) {
-      const status = result?.res?.status;
-      console.error("[video-upload-oss] Upload failed, status:", status);
-      return NextResponse.json(
-        { success: false, message: `OSS 上传失败（HTTP ${status}）` },
-        { status: 500 }
-      );
-    }
-
-    const fileUrl = buildOSSUrl(objectKey);
-    console.log(`[video-upload-oss] success → ${fileUrl}`);
+    // Upload — ali-oss supports files of any size (100 MB+)
+    const fileUrl = await ossUpload(objectKey, bytes, file.type || "video/mp4");
+    console.log(`[video-upload] uploaded → ${fileUrl}`);
 
     const video = await prisma.video.create({
       data: { title, category, fileUrl, description },
@@ -116,10 +75,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, message: "视频上传成功", data: video });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    console.error("[video-upload-oss] Unexpected error:", msg);
-    return NextResponse.json(
-      { success: false, message: `上传失败：${msg}` },
-      { status: 500 }
-    );
+    console.error("[video-upload] Error:", msg);
+    return NextResponse.json({ success: false, message: `上传失败：${msg}` }, { status: 500 });
   }
 }
+
+// Export for use in admin page if needed
+export { ossPublicUrl };
