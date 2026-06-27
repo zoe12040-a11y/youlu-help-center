@@ -37,8 +37,10 @@ export default function HomePage() {
       .then((r) => r.json())
       .then((result) => {
         if (result.success) {
+          // Match "产品视频" or "产品介绍" (either name works)
           const intro = result.data.find(
-            (v: IntroVideo & { category: string }) => v.category === "产品介绍"
+            (v: IntroVideo & { category: string }) =>
+              v.category === "产品视频" || v.category === "产品介绍"
           );
           if (intro) setIntroVideo(intro);
         }

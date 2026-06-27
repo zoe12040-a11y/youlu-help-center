@@ -11,6 +11,17 @@ type Video = {
   createdAt: string;
 };
 
+// Default categories always shown (even if no videos exist yet)
+const DEFAULT_CATEGORIES = [
+  "产品视频",
+  "开机部署",
+  "充电操作",
+  "加水操作",
+  "倾倒垃圾",
+  "任务下发",
+  "返航操作",
+];
+
 export default function AdminVideosPage() {
   const [checkedLogin, setCheckedLogin] = useState(false);
   const [videos, setVideos] = useState<Video[]>([]);
@@ -21,6 +32,16 @@ export default function AdminVideosPage() {
 
   const [form, setForm] = useState({ title: "", category: "", description: "" });
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Custom categories added this session (persist to localStorage)
+  const [customCategories, setCustomCategories] = useState<string[]>([]);
+  const [newCategoryInput, setNewCategoryInput] = useState("");
+
+  // All available categories: defaults + DB + custom
+  const dbCategories = Array.from(new Set(videos.map((v) => v.category).filter(Boolean)));
+  const allCategories = Array.from(
+    new Set([...DEFAULT_CATEGORIES, ...dbCategories, ...customCategories])
+  ).sort();
 
   async function loadVideos() {
     setLoading(true);
@@ -39,10 +60,32 @@ export default function AdminVideosPage() {
     if (user.role !== "admin") { window.location.href = "/unauthorized"; return; }
     setCheckedLogin(true);
     loadVideos();
+    // Restore custom categories from localStorage
+    try {
+      const saved = JSON.parse(localStorage.getItem("youlu_video_categories") || "[]");
+      if (Array.isArray(saved)) setCustomCategories(saved);
+    } catch {}
   }, []);
 
-  // ── Upload via server-side API (no CORS issues, works for small/medium files) ──
-  // Vercel free plan: ~4.5MB body limit. For larger files, presign flow needed.
+  function addCustomCategory() {
+    const name = newCategoryInput.trim();
+    if (!name || allCategories.includes(name)) {
+      setNewCategoryInput("");
+      return;
+    }
+    const updated = [...customCategories, name];
+    setCustomCategories(updated);
+    localStorage.setItem("youlu_video_categories", JSON.stringify(updated));
+    setNewCategoryInput("");
+  }
+
+  function removeCustomCategory(name: string) {
+    const updated = customCategories.filter((c) => c !== name);
+    setCustomCategories(updated);
+    localStorage.setItem("youlu_video_categories", JSON.stringify(updated));
+  }
+
+  // ── Upload via server-side API ────────────────────────────────────────────
   async function uploadVideo() {
     const file = fileRef.current?.files?.[0];
     if (!form.title.trim()) { alert("请填写视频标题"); return; }
@@ -60,7 +103,6 @@ export default function AdminVideosPage() {
     try {
       const res    = await fetch("/api/videos/upload", { method: "POST", body: data });
       const result = await res.json();
-
       if (result.success) {
         setUploadResult({ success: true, message: "视频上传成功！" });
         setForm({ title: "", category: "", description: "" });
@@ -83,14 +125,9 @@ export default function AdminVideosPage() {
     try {
       const res = await fetch(`/api/videos/${id}`, { method: "DELETE" });
       const r   = await res.json();
-      if (r.success) {
-        await loadVideos();
-      } else {
-        alert(`删除失败：${r.message}`);
-      }
-    } catch (e) {
-      alert("删除失败，请检查网络连接");
-    }
+      if (r.success) await loadVideos();
+      else alert(`删除失败：${r.message}`);
+    } catch { alert("删除失败，请检查网络连接"); }
     setDeletingId(null);
   }
 
@@ -103,8 +140,6 @@ export default function AdminVideosPage() {
       </main>
     );
   }
-
-  const categories = Array.from(new Set(videos.map((v) => v.category || "未分类")));
 
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-8 text-slate-900 md:px-6 md:py-10">
@@ -127,6 +162,59 @@ export default function AdminVideosPage() {
           </div>
         </div>
 
+        {/* Category management */}
+        <div className="rounded-3xl bg-white p-5 shadow-sm md:p-6">
+          <h2 className="text-lg font-bold text-slate-900">分类管理</h2>
+          <p className="mt-1 text-xs text-slate-400">
+            新增分类后自动出现在上传表单和前台分类导航中。
+            默认分类（灰色）不可删除，自定义分类（蓝色×）可删除。
+          </p>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {DEFAULT_CATEGORIES.map((cat) => (
+              <span key={cat}
+                className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                  cat === "产品视频"
+                    ? "bg-orange-50 text-orange-600"
+                    : "bg-slate-100 text-slate-600"
+                }`}>
+                {cat}
+                {cat === "产品视频" && <span className="ml-1 text-orange-400">★首页</span>}
+              </span>
+            ))}
+            {customCategories.map((cat) => (
+              <span key={cat} className="flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700">
+                {cat}
+                <button onClick={() => removeCustomCategory(cat)}
+                  className="ml-0.5 text-blue-400 hover:text-red-500">×</button>
+              </span>
+            ))}
+            {dbCategories.filter((c) => !DEFAULT_CATEGORIES.includes(c) && !customCategories.includes(c)).map((cat) => (
+              <span key={cat} className="rounded-full bg-green-50 px-3 py-1.5 text-xs font-bold text-green-700">
+                {cat} <span className="text-green-400">（已使用）</span>
+              </span>
+            ))}
+          </div>
+
+          {/* Add new category */}
+          <div className="mt-4 flex gap-2">
+            <input
+              value={newCategoryInput}
+              onChange={(e) => setNewCategoryInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addCustomCategory()}
+              placeholder="输入新分类名称..."
+              className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-blue-500"
+            />
+            <button
+              onClick={addCustomCategory}
+              disabled={!newCategoryInput.trim() || allCategories.includes(newCategoryInput.trim())}
+              className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white disabled:bg-slate-300"
+            >
+              + 新增分类
+            </button>
+          </div>
+        </div>
+
         {/* Upload form */}
         <div className="rounded-3xl bg-white p-5 shadow-sm md:p-8">
           <h2 className="text-lg font-bold text-slate-900 md:text-xl">上传新视频</h2>
@@ -144,18 +232,34 @@ export default function AdminVideosPage() {
                 placeholder="例如：开机操作教程"
                 className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500" />
             </div>
+
             <div>
               <label className="text-sm font-bold text-slate-700">分类</label>
-              <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}
-                placeholder="例如：开机部署"
-                className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500" />
+              {/* datalist combo: select existing or type new */}
+              <input
+                list="video-categories-list"
+                value={form.category}
+                onChange={(e) => setForm({ ...form, category: e.target.value })}
+                placeholder="选择或输入分类..."
+                className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500"
+              />
+              <datalist id="video-categories-list">
+                {allCategories.map((cat) => (
+                  <option key={cat} value={cat} />
+                ))}
+              </datalist>
+              <p className="mt-1 text-xs text-slate-400">
+                可从现有分类选择，或直接输入新分类名称
+              </p>
             </div>
+
             <div className="md:col-span-2">
               <label className="text-sm font-bold text-slate-700">描述（可选）</label>
               <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
                 placeholder="简短描述视频内容..."
                 className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500" />
             </div>
+
             <div className="md:col-span-2">
               <label className="text-sm font-bold text-slate-700">选择视频文件</label>
               <p className="mt-1 text-xs text-slate-400">支持 mp4、mov、avi 等格式，手机可从相册选择</p>
@@ -173,12 +277,14 @@ export default function AdminVideosPage() {
           </div>
         </div>
 
-        {/* Video list */}
+        {/* Video list grouped by category */}
         <div className="rounded-3xl bg-white p-5 shadow-sm md:p-6">
           <div className="flex items-center justify-between gap-4">
             <div>
               <h2 className="text-lg font-bold text-slate-900 md:text-xl">全部视频（{videos.length} 条）</h2>
-              {categories.length > 0 && <p className="mt-1 text-xs text-slate-400">分类：{categories.join("、")}</p>}
+              <p className="mt-1 text-xs text-slate-400">
+                共 {Array.from(new Set(videos.map((v) => v.category))).length} 个分类
+              </p>
             </div>
             <button onClick={loadVideos} className="rounded-xl border border-blue-200 bg-white px-4 py-2 text-sm font-bold text-blue-600">
               刷新
@@ -198,7 +304,11 @@ export default function AdminVideosPage() {
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-600">
+                        <span className={`rounded-full px-3 py-1 text-xs font-bold ${
+                          video.category === "产品视频" || video.category === "产品介绍"
+                            ? "bg-orange-50 text-orange-600"
+                            : "bg-blue-50 text-blue-600"
+                        }`}>
                           {video.category || "未分类"}
                         </span>
                         <span className="text-xs text-slate-400">{new Date(video.createdAt).toLocaleString()}</span>
@@ -208,7 +318,6 @@ export default function AdminVideosPage() {
                       <p className="mt-1 truncate text-xs text-slate-400">{video.fileUrl}</p>
                     </div>
 
-                    {/* Action buttons */}
                     <div className="flex shrink-0 flex-col gap-1.5">
                       <a href={video.fileUrl} target="_blank" rel="noopener noreferrer"
                         className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-center text-xs font-bold text-slate-700">
