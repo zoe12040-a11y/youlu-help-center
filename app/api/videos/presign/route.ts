@@ -76,7 +76,7 @@ export async function POST(request: Request) {
   console.log("[presign] objectKey:", objectKey);
 
   try {
-    const presignUrl = await ossPresignedPutUrl(objectKey, contentType, 3600);
+    const presignUrl = ossPresignedPutUrl(objectKey, contentType, 3600);
     const publicUrl  = ossPublicUrl(objectKey);
 
     // ── Full URL logged for debugging (valid for 1h, safe to log) ───────────

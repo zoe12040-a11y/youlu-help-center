@@ -66,7 +66,7 @@ export async function POST(request: Request) {
     const objectKey = `tickets/${Date.now()}-${rand}${safeExt}`;
 
     // ossPresignedPutUrl uses Web Crypto (no url.parse deprecation)
-    const uploadUrl = await ossPresignedPutUrl(objectKey, resolvedType, 3600);
+    const uploadUrl = ossPresignedPutUrl(objectKey, resolvedType, 3600);
     const publicUrl = ossPublicUrl(objectKey);
 
     return NextResponse.json({ success: true, uploadUrl, objectKey, publicUrl, fileType });
