@@ -2,6 +2,12 @@ import OSS from "ali-oss";
 
 // ── Client factory ────────────────────────────────────────────────────────────
 
+// Normalize OSS region: ali-oss requires "oss-cn-hangzhou" format.
+// If OSS_REGION is set as "cn-hangzhou" (without prefix), add "oss-" automatically.
+function normalizeRegion(r: string): string {
+  return r.startsWith("oss-") ? r : `oss-${r}`;
+}
+
 export function getOSSClient(): OSS {
   const region          = process.env.OSS_REGION;
   const accessKeyId     = process.env.OSS_ACCESS_KEY_ID;
@@ -18,7 +24,7 @@ export function getOSSClient(): OSS {
   if (missing) throw new Error(`缺少阿里云 OSS 环境变量：${missing}`);
 
   return new OSS({
-    region: region!,
+    region: normalizeRegion(region!),
     accessKeyId: accessKeyId!,
     accessKeySecret: accessKeySecret!,
     bucket: bucket!,
@@ -31,8 +37,9 @@ export function getOSSClient(): OSS {
 
 export function ossPublicUrl(objectKey: string): string {
   const bucket       = process.env.OSS_BUCKET!;
-  const region       = process.env.OSS_REGION!;
+  const region       = normalizeRegion(process.env.OSS_REGION!);
   const customDomain = process.env.OSS_CUSTOM_DOMAIN;
+  // Correct format: https://BUCKET.oss-REGION.aliyuncs.com/KEY
   return customDomain
     ? `https://${customDomain}/${objectKey}`
     : `https://${bucket}.${region}.aliyuncs.com/${objectKey}`;
