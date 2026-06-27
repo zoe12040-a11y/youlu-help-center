@@ -8,6 +8,7 @@ type User = {
   phone: string;
   role: string;
   isActive: boolean;
+  email: string | null;
   createdAt: string;
 };
 
@@ -18,7 +19,7 @@ const ROLE_COLOR: Record<string, string> = {
   customer: "bg-green-50 text-green-600",
 };
 
-type EditForm = { name: string; phone: string; password: string; role: string };
+type EditForm = { name: string; phone: string; password: string; role: string; email: string };
 
 export default function AdminUsersPage() {
   const [checkedLogin, setCheckedLogin] = useState(false);
@@ -27,7 +28,7 @@ export default function AdminUsersPage() {
   const [saving, setSaving] = useState(false);
 
   // Create form
-  const [createForm, setCreateForm] = useState({ name: "", phone: "", password: "123456", role: "customer" });
+  const [createForm, setCreateForm] = useState({ name: "", phone: "", password: "123456", role: "customer", email: "" });
 
   // Edit state
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -69,7 +70,7 @@ export default function AdminUsersPage() {
       });
       const result = await res.json();
       if (result.success) {
-        setCreateForm({ name: "", phone: "", password: "123456", role: "customer" });
+        setCreateForm({ name: "", phone: "", password: "123456", role: "customer", email: "" });
         await loadUsers();
       } else {
         alert(result.message || "创建失败");
@@ -81,14 +82,20 @@ export default function AdminUsersPage() {
   // ── Edit ─────────────────────────────────────────────────────────────────────
   function startEdit(user: User) {
     setEditingId(user.id);
-    setEditForm({ name: user.name, phone: user.phone, password: "", role: user.role });
+    setEditForm({ name: user.name, phone: user.phone, password: "", role: user.role, email: user.email ?? "" });
   }
 
   async function saveEdit() {
     if (!editingId) return;
     setSaving(true);
     try {
-      const payload: Record<string, unknown> = { id: editingId, name: editForm.name, phone: editForm.phone, role: editForm.role };
+      const payload: Record<string, unknown> = {
+        id: editingId,
+        name: editForm.name,
+        phone: editForm.phone,
+        role: editForm.role,
+        email: editForm.email.trim() || null,
+      };
       if (editForm.password.trim()) payload.password = editForm.password;
       const res = await fetch("/api/users", {
         method: "PATCH",
@@ -224,6 +231,16 @@ export default function AdminUsersPage() {
                     className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500" />
                 </div>
                 <div>
+                  <label className="text-sm font-bold text-slate-700">邮箱（用于找回密码）</label>
+                  <input
+                    type="email"
+                    value={editForm.email}
+                    onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                    placeholder="example@company.com（可选）"
+                    className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
                   <label className="text-sm font-bold text-slate-700">新密码（留空不修改）</label>
                   <input type="password" value={editForm.password}
                     onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
@@ -272,6 +289,16 @@ export default function AdminUsersPage() {
                   <input value={createForm.password}
                     onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
                     className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="text-sm font-bold text-slate-700">邮箱（用于找回密码）</label>
+                  <input
+                    type="email"
+                    value={createForm.email}
+                    onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
+                    placeholder="example@company.com（可选）"
+                    className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500"
+                  />
                 </div>
                 <div>
                   <label className="text-sm font-bold text-slate-700">角色</label>
@@ -341,6 +368,9 @@ export default function AdminUsersPage() {
                           </span>
                         </div>
                         <p className="mt-1 text-xs text-slate-500">账号：{user.phone}</p>
+                        {user.email && (
+                          <p className="text-xs text-slate-400">✉ {user.email}</p>
+                        )}
                         <p className="text-xs text-slate-400">{new Date(user.createdAt).toLocaleDateString()}</p>
                       </div>
 

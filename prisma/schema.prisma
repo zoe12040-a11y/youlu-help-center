@@ -9,15 +9,18 @@ datasource db {
 }
 
 model User {
-  id              Int      @id @default(autoincrement())
-  name            String
-  phone           String   @unique
-  password        String
-  role            String   @default("customer")
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  assignedTickets Ticket[] @relation("AssignedTickets")
+  id               Int       @id @default(autoincrement())
+  name             String
+  phone            String    @unique
+  password         String
+  role             String    @default("customer")
+  isActive         Boolean   @default(true)
+  email            String?
+  resetToken       String?
+  resetTokenExpiry DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  assignedTickets  Ticket[]  @relation("AssignedTickets")
 }
 
 model Ticket {

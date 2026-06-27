@@ -117,12 +117,14 @@ export default function LoginPage() {
                 {loading ? "登录中..." : "登录"}
               </button>
 
-              <a
-                href="/"
-                className="block text-center text-sm font-bold text-slate-500"
-              >
-                返回首页
-              </a>
+              <div className="flex items-center justify-between">
+                <a href="/forgot-password" className="text-sm font-bold text-blue-600 hover:text-blue-700">
+                  忘记密码？
+                </a>
+                <a href="/" className="text-sm font-bold text-slate-500 hover:text-slate-700">
+                  返回首页
+                </a>
+              </div>
             </div>
           </div>
         </div>

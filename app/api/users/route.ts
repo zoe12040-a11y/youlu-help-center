@@ -6,7 +6,7 @@ export async function GET() {
   try {
     const users = await prisma.user.findMany({
       orderBy: { createdAt: "desc" },
-      select: { id: true, name: true, phone: true, role: true, isActive: true, createdAt: true, updatedAt: true },
+      select: { id: true, name: true, phone: true, role: true, isActive: true, email: true, createdAt: true, updatedAt: true },
     });
     return NextResponse.json({ success: true, data: users });
   } catch (error) {
@@ -28,10 +28,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, message: "该账号已存在" }, { status: 400 });
     }
 
+    const email = body.email?.trim() || null;
     const hashedPassword = await bcrypt.hash(password || "123456", 10);
     const user = await prisma.user.create({
-      data: { name, phone, password: hashedPassword, role: role || "customer", isActive: true },
-      select: { id: true, name: true, phone: true, role: true, isActive: true, createdAt: true },
+      data: { name, phone, password: hashedPassword, role: role || "customer", isActive: true, email },
+      select: { id: true, name: true, phone: true, role: true, isActive: true, email: true, createdAt: true },
     });
 
     return NextResponse.json({ success: true, message: "账号创建成功", data: user });
@@ -63,6 +64,7 @@ export async function PATCH(request: Request) {
     }
     if (password?.trim()) updateData.password = await bcrypt.hash(password.trim(), 10);
     if (role) updateData.role = role;
+    if ("email" in body) updateData.email = body.email?.trim() || null;
 
     const user = await prisma.user.update({
       where: { id: Number(id) },
