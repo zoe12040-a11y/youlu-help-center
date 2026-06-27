@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 
 type User = { id: number; name: string; phone: string; role: string };
-type IntroVideo = { id: number; title: string; fileUrl: string; description: string };
+type HomeVideo = { id: number; title: string; fileUrl: string; description: string; category: string };
 
 export default function HomePage() {
   const [user, setUser] = useState<User | null>(null);
   const [unresolvedCount, setUnresolvedCount] = useState(0);
-  const [introVideo, setIntroVideo] = useState<IntroVideo | null>(null);
+  const [homeVideos, setHomeVideos] = useState<HomeVideo[]>([]);
+  const [activeVideoIdx, setActiveVideoIdx] = useState(0);
 
   useEffect(() => {
     const userText = localStorage.getItem("youlu_user");
@@ -31,18 +32,16 @@ export default function HomePage() {
       .catch(() => {});
   }, []);
 
-  // Fetch product intro video independently (no auth needed)
+  // Fetch all videos marked showOnHome=true
   useEffect(() => {
     fetch("/api/videos")
       .then((r) => r.json())
       .then((result) => {
         if (result.success) {
-          // Match "产品视频" or "产品介绍" (either name works)
-          const intro = result.data.find(
-            (v: IntroVideo & { category: string }) =>
-              v.category === "产品视频" || v.category === "产品介绍"
-          );
-          if (intro) setIntroVideo(intro);
+          const featured = (result.data as (HomeVideo & { showOnHome: boolean })[])
+            .filter((v) => v.showOnHome);
+          setHomeVideos(featured);
+          setActiveVideoIdx(0);
         }
       })
       .catch(() => {});
@@ -156,45 +155,89 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Product intro video */}
-        <div className="mt-6 rounded-3xl bg-white p-5 shadow-sm md:p-8">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-sm text-blue-500">Product Introduction</p>
-              <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">产品介绍视频</h2>
+        {/* Homepage featured videos */}
+        {homeVideos.length > 0 && (
+          <div className="mt-6 rounded-3xl bg-white p-5 shadow-sm md:p-8">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm text-blue-500">Featured Videos</p>
+                <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">
+                  精选视频
+                </h2>
+              </div>
+              <a href="/tutorials" className="text-sm font-bold text-blue-600">
+                查看全部教程 →
+              </a>
             </div>
-            <a href="/tutorials" className="text-sm font-bold text-blue-600">
-              查看全部教程 →
-            </a>
-          </div>
 
-          {introVideo ? (
-            <div className="mt-4 overflow-hidden rounded-2xl bg-slate-900">
-              <video
-                src={introVideo.fileUrl}
-                controls
-                preload="metadata"
-                className="aspect-video w-full"
-              />
-              <div className="p-4">
-                <p className="font-bold text-white">{introVideo.title}</p>
-                {introVideo.description && (
-                  <p className="mt-1 text-sm text-slate-400">{introVideo.description}</p>
-                )}
+            {/* Single video */}
+            {homeVideos.length === 1 && (
+              <div className="mt-4 overflow-hidden rounded-2xl bg-slate-900">
+                <video src={homeVideos[0].fileUrl} controls preload="metadata"
+                  className="aspect-video w-full" />
+                <div className="p-4">
+                  <p className="font-bold text-white">{homeVideos[0].title}</p>
+                  {homeVideos[0].description && (
+                    <p className="mt-1 text-sm text-slate-400">{homeVideos[0].description}</p>
+                  )}
+                </div>
               </div>
-            </div>
-          ) : (
-            <div className="mt-4 flex aspect-video items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50">
-              <div className="text-center">
-                <p className="text-2xl">🎬</p>
-                <p className="mt-2 text-sm font-bold text-slate-500">产品介绍视频</p>
-                <p className="mt-1 text-xs text-slate-400">
-                  管理员可在「视频管理」中上传分类为「产品介绍」的视频
-                </p>
+            )}
+
+            {/* Multiple videos — tab switcher */}
+            {homeVideos.length > 1 && (
+              <div className="mt-4">
+                {/* Tab buttons */}
+                <div className="flex gap-2 overflow-x-auto pb-2">
+                  {homeVideos.map((v, i) => (
+                    <button
+                      key={v.id}
+                      onClick={() => setActiveVideoIdx(i)}
+                      className={`shrink-0 rounded-xl px-4 py-2 text-sm font-bold transition ${
+                        activeVideoIdx === i
+                          ? "bg-blue-600 text-white"
+                          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      }`}
+                    >
+                      {v.title}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Active video */}
+                <div className="mt-3 overflow-hidden rounded-2xl bg-slate-900">
+                  <video
+                    key={homeVideos[activeVideoIdx]?.id}
+                    src={homeVideos[activeVideoIdx]?.fileUrl}
+                    controls
+                    preload="metadata"
+                    className="aspect-video w-full"
+                  />
+                  {homeVideos[activeVideoIdx]?.description && (
+                    <div className="p-4">
+                      <p className="text-sm text-slate-400">
+                        {homeVideos[activeVideoIdx].description}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Dot indicators */}
+                <div className="mt-3 flex justify-center gap-2">
+                  {homeVideos.map((_, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setActiveVideoIdx(i)}
+                      className={`h-2 rounded-full transition-all ${
+                        activeVideoIdx === i ? "w-6 bg-blue-600" : "w-2 bg-slate-300"
+                      }`}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
 
         {/* Feature cards */}
         <div className="mt-6 grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-4">

@@ -2,6 +2,39 @@ import { NextResponse } from "next/server";
 import { prisma } from "../../../../lib/prisma";
 import { getOSSClient } from "../../../../lib/oss";
 
+/** PATCH /api/videos/[id]
+ *  Updates video fields. Supported: { showOnHome: boolean }
+ */
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const videoId = Number(id);
+    if (!videoId || isNaN(videoId)) {
+      return NextResponse.json({ success: false, message: "无效的视频 ID" }, { status: 400 });
+    }
+
+    const body = await request.json();
+    const updateData: Record<string, unknown> = {};
+
+    if ("showOnHome" in body) updateData.showOnHome = Boolean(body.showOnHome);
+    // More fields can be added here in the future
+
+    if (Object.keys(updateData).length === 0) {
+      return NextResponse.json({ success: false, message: "没有可更新的字段" }, { status: 400 });
+    }
+
+    const video = await prisma.video.update({ where: { id: videoId }, data: updateData });
+    return NextResponse.json({ success: true, data: video });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("[video-patch] Error:", msg);
+    return NextResponse.json({ success: false, message: `更新失败：${msg}` }, { status: 500 });
+  }
+}
+
 /** DELETE /api/videos/[id]
  *  Deletes the video record from the database AND the file from OSS (best-effort).
  */

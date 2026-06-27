@@ -8,6 +8,7 @@ type Video = {
   category: string;
   fileUrl: string;
   description: string;
+  showOnHome: boolean;
   createdAt: string;
 };
 
@@ -116,6 +117,28 @@ export default function AdminVideosPage() {
       setUploadResult({ success: false, message: `上传失败：${msg}` });
     }
     setUploading(false);
+  }
+
+  // ── Toggle showOnHome ─────────────────────────────────────────────────────
+  async function toggleShowOnHome(id: number, value: boolean) {
+    // Optimistic update
+    setVideos((prev) => prev.map((v) => v.id === id ? { ...v, showOnHome: value } : v));
+    try {
+      const res = await fetch(`/api/videos/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ showOnHome: value }),
+      });
+      const r = await res.json();
+      if (!r.success) {
+        // Revert on failure
+        setVideos((prev) => prev.map((v) => v.id === id ? { ...v, showOnHome: !value } : v));
+        alert(`操作失败：${r.message}`);
+      }
+    } catch {
+      setVideos((prev) => prev.map((v) => v.id === id ? { ...v, showOnHome: !value } : v));
+      alert("操作失败，请检查网络");
+    }
   }
 
   // ── Delete video (DB + OSS) ────────────────────────────────────────────────
@@ -318,19 +341,39 @@ export default function AdminVideosPage() {
                       <p className="mt-1 truncate text-xs text-slate-400">{video.fileUrl}</p>
                     </div>
 
-                    <div className="flex shrink-0 flex-col gap-1.5">
-                      <a href={video.fileUrl} target="_blank" rel="noopener noreferrer"
-                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-center text-xs font-bold text-slate-700">
-                        预览
-                      </a>
-                      <button
-                        onClick={() => deleteVideo(video.id, video.title)}
-                        disabled={deletingId === video.id}
-                        className="rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 disabled:opacity-50"
-                        title="删除视频（同时删除OSS文件）"
-                      >
-                        {deletingId === video.id ? "删除中..." : "🗑️ 删除"}
-                      </button>
+                    <div className="flex shrink-0 flex-col items-end gap-2">
+                      {/* Home toggle */}
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-bold ${video.showOnHome ? "text-blue-600" : "text-slate-400"}`}>
+                          {video.showOnHome ? "首页展示中" : "不展示"}
+                        </span>
+                        <button
+                          onClick={() => toggleShowOnHome(video.id, !video.showOnHome)}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                            video.showOnHome ? "bg-blue-600" : "bg-slate-200"
+                          }`}
+                          title={video.showOnHome ? "点击关闭首页展示" : "点击开启首页展示"}
+                        >
+                          <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                            video.showOnHome ? "translate-x-6" : "translate-x-1"
+                          }`} />
+                        </button>
+                      </div>
+
+                      <div className="flex gap-1.5">
+                        <a href={video.fileUrl} target="_blank" rel="noopener noreferrer"
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-center text-xs font-bold text-slate-700">
+                          预览
+                        </a>
+                        <button
+                          onClick={() => deleteVideo(video.id, video.title)}
+                          disabled={deletingId === video.id}
+                          className="rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                          title="删除视频（同时删除OSS文件）"
+                        >
+                          {deletingId === video.id ? "..." : "🗑️"}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>

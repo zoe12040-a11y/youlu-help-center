@@ -1,4 +1,6 @@
 import { prisma } from "../../../lib/prisma";
+
+export const dynamic = "force-dynamic"; // render at request time, not build time
 import HelpfulFeedback from "../_components/HelpfulFeedback";
 
 export default async function TutorialTaskPage() {
