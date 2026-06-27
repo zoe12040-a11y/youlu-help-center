@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { NextResponse } from "next/server";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
@@ -33,9 +34,9 @@ export async function POST(request: Request) {
     }
 
     const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
+    const buffer = new Uint8Array(bytes);
 
-    const uploadDir = path.join(process.cwd(), "public", "uploads", "videos");
+    const uploadDir = path.join(path.resolve("."), "public", "uploads", "videos");
     await mkdir(uploadDir, { recursive: true });
 
     const safeFileName =

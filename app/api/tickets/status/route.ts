@@ -28,15 +28,18 @@ export async function PATCH(request: Request) {
       data: { status },
     });
 
-    await prisma.ticketLog.create({
-      data: {
-        ticketId,
-        oldStatus: current.status,
-        newStatus: status,
-        operator: operator || "售后管理员",
-        remark: remark || `状态更新为：${status}`,
-      },
-    });
+    // Only write a log entry when the status actually changes
+    if (status !== current.status) {
+      await prisma.ticketLog.create({
+        data: {
+          ticketId,
+          oldStatus: current.status,
+          newStatus: status,
+          operator: operator || "售后管理员",
+          remark: remark || `状态更新为：${status}`,
+        },
+      });
+    }
 
     return NextResponse.json({ success: true, data: ticket });
   } catch (error) {

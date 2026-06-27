@@ -39,7 +39,7 @@ export default function TicketPage() {
   const [toast, setToast] = useState({ visible: false, message: "" });
 
   const [form, setForm] = useState({
-    customer: "", contact: "", device: "", project: "", type: "", level: "", description: "",
+    customer: "", contact: "", phone: "", device: "", project: "", type: "", level: "", description: "",
   });
 
   const [files, setFiles] = useState<LocalFile[]>([]);
@@ -185,7 +185,7 @@ export default function TicketPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
-          phone: user.phone,
+          phone: form.phone || user.phone,
           customer: form.customer || user.name,
           contact: form.contact || user.name,
           attachments: JSON.stringify(attachments),
@@ -199,7 +199,7 @@ export default function TicketPage() {
         setSubmitted(true);
         showToast(`工单提交成功！编号：${result.data.ticketNo}`);
         // Reset
-        setForm({ customer: "", contact: "", device: "", project: "", type: "", level: "", description: "" });
+        setForm({ customer: "", contact: "", phone: "", device: "", project: "", type: "", level: "", description: "" });
         files.forEach((f) => URL.revokeObjectURL(f.previewUrl));
         setFiles([]);
       } else {
@@ -272,9 +272,13 @@ export default function TicketPage() {
 
             <div>
               <label className="text-sm font-bold text-slate-700">联系电话</label>
-              <input value={currentUser?.phone ?? ""} disabled
-                className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-400 outline-none" />
-              <p className="mt-1 text-xs text-slate-400">由系统自动绑定。</p>
+              <input
+                value={form.phone}
+                onChange={(e) => updateForm("phone", e.target.value)}
+                placeholder={currentUser?.phone ?? "请输入现场联系电话"}
+                className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500"
+              />
+              <p className="mt-1 text-xs text-slate-400">可填写现场联系电话，留空则使用账号绑定电话。</p>
             </div>
 
             <div>

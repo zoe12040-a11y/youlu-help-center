@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { NextResponse } from "next/server";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
@@ -36,8 +37,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const uploadDir = path.join(process.cwd(), "public", "uploads", "tickets");
+    const buffer = new Uint8Array(await file.arrayBuffer());
+    const uploadDir = path.join(path.resolve("."), "public", "uploads", "tickets");
     await mkdir(uploadDir, { recursive: true });
 
     // Filename: timestamp + random suffix + extension (no original filename to avoid path injection)

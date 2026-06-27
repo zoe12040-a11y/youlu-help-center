@@ -3,10 +3,12 @@
 import { useEffect, useState } from "react";
 
 type User = { id: number; name: string; phone: string; role: string };
+type IntroVideo = { id: number; title: string; fileUrl: string; description: string };
 
 export default function HomePage() {
   const [user, setUser] = useState<User | null>(null);
   const [unresolvedCount, setUnresolvedCount] = useState(0);
+  const [introVideo, setIntroVideo] = useState<IntroVideo | null>(null);
 
   useEffect(() => {
     const userText = localStorage.getItem("youlu_user");
@@ -24,6 +26,21 @@ export default function HomePage() {
             (t: { status: string }) => t.status !== "已解决"
           ).length;
           setUnresolvedCount(unresolved);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Fetch product intro video independently (no auth needed)
+  useEffect(() => {
+    fetch("/api/videos")
+      .then((r) => r.json())
+      .then((result) => {
+        if (result.success) {
+          const intro = result.data.find(
+            (v: IntroVideo & { category: string }) => v.category === "产品介绍"
+          );
+          if (intro) setIntroVideo(intro);
         }
       })
       .catch(() => {});
@@ -135,6 +152,46 @@ export default function HomePage() {
           <div className="flex items-center justify-center rounded-3xl bg-slate-50 p-6">
             <img src="/AI30.png" alt="有鹿机器人" className="max-h-[360px] w-full object-contain md:max-h-[420px]" />
           </div>
+        </div>
+
+        {/* Product intro video */}
+        <div className="mt-6 rounded-3xl bg-white p-5 shadow-sm md:p-8">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm text-blue-500">Product Introduction</p>
+              <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">产品介绍视频</h2>
+            </div>
+            <a href="/tutorials" className="text-sm font-bold text-blue-600">
+              查看全部教程 →
+            </a>
+          </div>
+
+          {introVideo ? (
+            <div className="mt-4 overflow-hidden rounded-2xl bg-slate-900">
+              <video
+                src={introVideo.fileUrl}
+                controls
+                preload="metadata"
+                className="aspect-video w-full"
+              />
+              <div className="p-4">
+                <p className="font-bold text-white">{introVideo.title}</p>
+                {introVideo.description && (
+                  <p className="mt-1 text-sm text-slate-400">{introVideo.description}</p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4 flex aspect-video items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50">
+              <div className="text-center">
+                <p className="text-2xl">🎬</p>
+                <p className="mt-2 text-sm font-bold text-slate-500">产品介绍视频</p>
+                <p className="mt-1 text-xs text-slate-400">
+                  管理员可在「视频管理」中上传分类为「产品介绍」的视频
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Feature cards */}

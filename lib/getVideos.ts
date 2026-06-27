@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import fs from "fs";
 import path from "path";
 
@@ -47,7 +48,7 @@ function toDisplayName(filename: string): string {
  * skipped to avoid serving the same content twice from the numbered folders.
  */
 export function getVideosBySlug(slug: string): VideoFile[] {
-  const videosDir = path.join(process.cwd(), "public", "videos");
+  const videosDir = path.join(path.resolve("."), "public", "videos");
   if (!fs.existsSync(videosDir)) return [];
 
   const keywords = SLUG_KEYWORDS[slug] ?? [];
