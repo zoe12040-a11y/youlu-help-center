@@ -1,98 +1,107 @@
 import { NextResponse } from "next/server";
 import { getOSSClient, ossPublicUrl } from "../../../../lib/oss";
 
+/** GET /api/videos/presign
+ *  Health-check: visit in browser to confirm the route is live and env vars are set.
+ *  Returns env var status (never exposes secret values).
+ */
+export async function GET() {
+  const status = {
+    route: "ok",
+    env: {
+      OSS_REGION:          process.env.OSS_REGION          ? "✅ set" : "❌ MISSING",
+      OSS_BUCKET:          process.env.OSS_BUCKET          ? "✅ set" : "❌ MISSING",
+      OSS_ACCESS_KEY_ID:   process.env.OSS_ACCESS_KEY_ID   ? "✅ set" : "❌ MISSING",
+      OSS_ACCESS_KEY_SECRET: process.env.OSS_ACCESS_KEY_SECRET ? "✅ set" : "❌ MISSING",
+    },
+  };
+  return NextResponse.json(status);
+}
+
 const ACCEPTED_VIDEO_TYPES = new Set([
-  "video/mp4",
-  "video/quicktime",
-  "video/avi",
-  "video/x-msvideo",
-  "video/webm",
-  "video/ogg",
-  "video/3gpp",
-  "video/3gpp2",
+  "video/mp4", "video/quicktime", "video/avi", "video/x-msvideo",
+  "video/webm", "video/ogg", "video/3gpp", "video/3gpp2",
   "application/octet-stream",
 ]);
 
+/** POST /api/videos/presign
+ *  Body: { filename: string, contentType: string }
+ *  Returns: { success, uploadUrl, objectKey, publicUrl }
+ */
 export async function POST(request: Request) {
-  // ── Step 0: Diagnose env vars (visible in Vercel Function Logs) ──────────────
-  console.log("[presign/videos] ENV check:", {
+  // ── Env var check ────────────────────────────────────────────────────────
+  console.log("[presign/videos] ENV:", {
     region:    process.env.OSS_REGION    ?? "MISSING",
     bucket:    process.env.OSS_BUCKET    ?? "MISSING",
     hasKey:    !!process.env.OSS_ACCESS_KEY_ID,
     hasSecret: !!process.env.OSS_ACCESS_KEY_SECRET,
   });
 
-  // ── Step 1: Guard — fail fast with a clear message if env vars are absent ──
-  const missing = [
+  const missingVars = [
     !process.env.OSS_REGION          && "OSS_REGION",
     !process.env.OSS_BUCKET          && "OSS_BUCKET",
     !process.env.OSS_ACCESS_KEY_ID     && "OSS_ACCESS_KEY_ID",
     !process.env.OSS_ACCESS_KEY_SECRET && "OSS_ACCESS_KEY_SECRET",
   ].filter(Boolean);
 
-  if (missing.length > 0) {
-    const msg = `服务器缺少环境变量：${missing.join(", ")}（请在 Vercel → Settings → Environment Variables 中添加）`;
-    console.error("[presign/videos] Missing env:", missing.join(", "));
+  if (missingVars.length > 0) {
+    const msg = `服务器缺少环境变量：${missingVars.join(", ")}`;
+    console.error("[presign/videos]", msg);
     return NextResponse.json({ success: false, message: msg }, { status: 500 });
   }
 
+  // ── Parse request body ───────────────────────────────────────────────────
+  let filename = "", contentType = "";
   try {
-    const body = await request.json().catch(() => ({}));
-    const { filename, contentType } = body as { filename?: string; contentType?: string };
-
-    if (!filename) {
-      return NextResponse.json({ success: false, message: "缺少 filename 参数" }, { status: 400 });
-    }
-
-    const validType =
-      ACCEPTED_VIDEO_TYPES.has(contentType ?? "") ||
-      /\.(mp4|mov|avi|webm|ogv|3gp|3g2)$/i.test(filename);
-
-    if (!validType) {
-      return NextResponse.json(
-        { success: false, message: `不支持的文件类型：${contentType ?? "unknown"}（${filename}）` },
-        { status: 400 }
-      );
-    }
-
-    // Build safe ASCII object key
-    const cleanName = filename.replace(/[^\w\-._]/g, "_");
-    const objectKey = `tutorials/${Date.now()}-${cleanName}`;
-
-    // ── Step 2: Create OSS client ───────────────────────────────────────────
-    let client;
-    try {
-      client = getOSSClient();
-      console.log("[presign/videos] OSS client created OK");
-    } catch (clientErr) {
-      const msg = clientErr instanceof Error ? clientErr.message : String(clientErr);
-      console.error("[presign/videos] Client creation failed:", msg);
-      return NextResponse.json({ success: false, message: `OSS 客户端初始化失败：${msg}` }, { status: 500 });
-    }
-
-    // ── Step 3: Generate presigned URL ─────────────────────────────────────
-    // NOTE: We do NOT include Content-Type in the signature.
-    // This avoids an ali-oss v6 compatibility issue and lets the browser
-    // set any Content-Type in the PUT request freely.
-    let uploadUrl: string;
-    try {
-      uploadUrl = client.signatureUrl(objectKey, {
-        expires: 3600,
-        method:  "PUT",
-      });
-      console.log("[presign/videos] Signed URL generated, objectKey:", objectKey);
-    } catch (signErr) {
-      const msg = signErr instanceof Error ? signErr.message : String(signErr);
-      console.error("[presign/videos] signatureUrl failed:", msg);
-      return NextResponse.json({ success: false, message: `生成签名 URL 失败：${msg}` }, { status: 500 });
-    }
-
-    const publicUrl = ossPublicUrl(objectKey);
-    return NextResponse.json({ success: true, uploadUrl, objectKey, publicUrl });
-
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error("[presign/videos] Unexpected error:", msg);
-    return NextResponse.json({ success: false, message: `接口错误：${msg}` }, { status: 500 });
+    const body = await request.json();
+    filename    = body.filename    ?? "";
+    contentType = body.contentType ?? "";
+  } catch {
+    return NextResponse.json({ success: false, message: "请求体必须是 JSON" }, { status: 400 });
   }
+
+  if (!filename) {
+    return NextResponse.json({ success: false, message: "缺少 filename 参数" }, { status: 400 });
+  }
+
+  const validType =
+    ACCEPTED_VIDEO_TYPES.has(contentType) ||
+    /\.(mp4|mov|avi|webm|ogv|3gp|3g2)$/i.test(filename);
+
+  if (!validType) {
+    return NextResponse.json(
+      { success: false, message: `不支持的文件类型：${contentType || "unknown"}（${filename}）` },
+      { status: 400 }
+    );
+  }
+
+  // ── Create OSS client ────────────────────────────────────────────────────
+  let client;
+  try {
+    client = getOSSClient();
+    console.log("[presign/videos] OSS client OK");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[presign/videos] Client error:", msg);
+    return NextResponse.json({ success: false, message: `OSS 初始化失败：${msg}` }, { status: 500 });
+  }
+
+  // ── Generate presigned PUT URL ───────────────────────────────────────────
+  const cleanName = filename.replace(/[^\w\-._]/g, "_");
+  const objectKey = `tutorials/${Date.now()}-${cleanName}`;
+
+  let uploadUrl: string;
+  try {
+    // NOTE: Content-Type intentionally excluded from signature (ali-oss v6 compatibility).
+    // The browser can set any Content-Type in the PUT request.
+    uploadUrl = client.signatureUrl(objectKey, { expires: 3600, method: "PUT" });
+    console.log("[presign/videos] Signed URL OK, key:", objectKey);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[presign/videos] signatureUrl error:", msg);
+    return NextResponse.json({ success: false, message: `生成签名失败：${msg}` }, { status: 500 });
+  }
+
+  const publicUrl = ossPublicUrl(objectKey);
+  return NextResponse.json({ success: true, uploadUrl, objectKey, publicUrl });
 }

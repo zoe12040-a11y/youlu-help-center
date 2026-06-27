@@ -91,7 +91,16 @@ export default function AdminVideosPage() {
           contentType: file.type || "video/mp4",
         }),
       });
-      const presign = await presignRes.json();
+
+      // Always check HTTP status before parsing JSON
+      // (Vercel may return an HTML error page on 500, causing json() to throw)
+      let presign: { success: boolean; message?: string; uploadUrl?: string; objectKey?: string };
+      if (!presignRes.ok) {
+        let detail = `HTTP ${presignRes.status}`;
+        try { const j = await presignRes.json(); detail = j.message ?? detail; } catch { /* ignore */ }
+        throw new Error(`获取上传凭证失败（${detail}）`);
+      }
+      presign = await presignRes.json();
       if (!presign.success) throw new Error(presign.message || "获取上传凭证失败");
 
       const { uploadUrl, objectKey } = presign as { uploadUrl: string; objectKey: string };
