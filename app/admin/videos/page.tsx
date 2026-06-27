@@ -11,22 +11,42 @@ type Video = {
   createdAt: string;
 };
 
+type UploadPhase = "idle" | "presigning" | "uploading" | "confirming" | "done" | "error";
+
+// XHR-based PUT with progress tracking (fetch doesn't support upload progress)
+function putToOSS(
+  url: string,
+  file: File,
+  contentType: string,
+  onProgress: (pct: number) => void
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("Content-Type", contentType);
+    xhr.onload = () =>
+      xhr.status >= 200 && xhr.status < 300
+        ? resolve()
+        : reject(new Error(`OSS 返回 ${xhr.status}：${xhr.responseText.slice(0, 200)}`));
+    xhr.onerror = () => reject(new Error("网络错误，请检查连接"));
+    xhr.ontimeout = () => reject(new Error("上传超时"));
+    xhr.send(file);
+  });
+}
+
 export default function AdminVideosPage() {
   const [checkedLogin, setCheckedLogin] = useState(false);
   const [videos, setVideos] = useState<Video[]>([]);
   const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
-  const [uploadResult, setUploadResult] = useState<{
-    success: boolean;
-    message: string;
-  } | null>(null);
 
-  const [form, setForm] = useState({
-    title: "",
-    category: "",
-    description: "",
-  });
+  const [uploadPhase, setUploadPhase] = useState<UploadPhase>("idle");
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadMessage, setUploadMessage] = useState("");
 
+  const [form, setForm] = useState({ title: "", category: "", description: "" });
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function loadVideos() {
@@ -43,77 +63,92 @@ export default function AdminVideosPage() {
 
   useEffect(() => {
     const userText = localStorage.getItem("youlu_user");
-    if (!userText) {
-      window.location.href = "/login";
-      return;
-    }
+    if (!userText) { window.location.href = "/login"; return; }
     const user = JSON.parse(userText);
-    if (user.role !== "admin") {
-      window.location.href = "/unauthorized";
-      return;
-    }
+    if (user.role !== "admin") { window.location.href = "/unauthorized"; return; }
     setCheckedLogin(true);
     loadVideos();
   }, []);
 
+  // ── Three-step presigned upload ───────────────────────────────────────────
+
   async function uploadVideo() {
     const file = fileRef.current?.files?.[0];
+    if (!form.title.trim()) { alert("请填写视频标题"); return; }
+    if (!file) { alert("请选择要上传的视频文件"); return; }
 
-    if (!form.title.trim()) {
-      alert("请填写视频标题");
-      return;
-    }
-    if (!file) {
-      alert("请选择要上传的视频文件");
-      return;
-    }
-
-    setUploading(true);
-    setUploadResult(null);
+    setUploadPhase("presigning");
+    setUploadProgress(0);
+    setUploadMessage("正在获取上传凭证...");
 
     try {
-      const data = new FormData();
-      data.append("title", form.title);
-      data.append("category", form.category || "未分类");
-      data.append("description", form.description);
-      data.append("file", file);
-
-      const res = await fetch("/api/videos/upload", {
+      // Step 1: Get presigned URL
+      const presignRes = await fetch("/api/videos/presign", {
         method: "POST",
-        body: data,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: file.name,
+          contentType: file.type || "video/mp4",
+        }),
+      });
+      const presign = await presignRes.json();
+      if (!presign.success) throw new Error(presign.message || "获取上传凭证失败");
+
+      const { uploadUrl, objectKey } = presign as { uploadUrl: string; objectKey: string };
+      const resolvedType = (file.type && file.type !== "application/octet-stream")
+        ? file.type : "video/mp4";
+
+      // Step 2: PUT directly to OSS
+      setUploadPhase("uploading");
+      setUploadMessage(`正在上传「${file.name}」（${(file.size / 1024 / 1024).toFixed(1)} MB）...`);
+
+      await putToOSS(uploadUrl, file, resolvedType, (pct) => {
+        setUploadProgress(pct);
+        setUploadMessage(`上传中 ${pct}%...`);
       });
 
-      const result = await res.json();
+      // Step 3: Confirm to DB
+      setUploadPhase("confirming");
+      setUploadMessage("正在写入数据库...");
+      setUploadProgress(100);
 
-      if (result.success) {
-        setUploadResult({ success: true, message: "视频上传成功！" });
-        setForm({ title: "", category: "", description: "" });
-        if (fileRef.current) fileRef.current.value = "";
-        await loadVideos();
-      } else {
-        setUploadResult({
-          success: false,
-          message: result.message || "上传失败，请稍后重试",
-        });
-      }
-    } catch (e) {
-      console.error("上传失败：", e);
-      setUploadResult({ success: false, message: "上传失败，请检查网络" });
+      const confirmRes = await fetch("/api/videos/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          objectKey,
+          title: form.title,
+          category: form.category || "未分类",
+          description: form.description,
+        }),
+      });
+      const confirm = await confirmRes.json();
+      if (!confirm.success) throw new Error(confirm.message || "写入数据库失败");
+
+      setUploadPhase("done");
+      setUploadMessage("✅ 视频上传成功！");
+      setForm({ title: "", category: "", description: "" });
+      if (fileRef.current) fileRef.current.value = "";
+      await loadVideos();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error("[uploadVideo]", msg);
+      setUploadPhase("error");
+      setUploadMessage(`❌ ${msg}`);
     }
-
-    setUploading(false);
   }
+
+  const uploading = uploadPhase === "presigning" || uploadPhase === "uploading" || uploadPhase === "confirming";
+
+  // ── Delete ────────────────────────────────────────────────────────────────
 
   async function deleteVideo(id: number, title: string) {
     if (!confirm(`确定要删除视频「${title}」吗？`)) return;
     try {
       const res = await fetch(`/api/videos?id=${id}`, { method: "DELETE" });
       const result = await res.json();
-      if (result.success) {
-        await loadVideos();
-      } else {
-        alert("删除失败，请稍后重试");
-      }
+      if (result.success) await loadVideos();
+      else alert("删除失败，请稍后重试");
     } catch (e) {
       console.error("删除失败：", e);
       alert("删除失败，请检查系统是否正常运行");
@@ -122,202 +157,204 @@ export default function AdminVideosPage() {
 
   if (!checkedLogin) {
     return (
-      <main className="min-h-screen bg-slate-100 px-6 py-10">
+      <main className="min-h-screen bg-slate-100 px-4 py-8">
         <section className="mx-auto max-w-4xl rounded-3xl bg-white p-8 shadow-sm">
-          <p className="text-slate-500">正在验证管理员权限...</p>
+          <p className="text-slate-400">正在验证管理员权限...</p>
         </section>
       </main>
     );
   }
 
-  const categories = Array.from(
-    new Set(videos.map((v) => v.category || "未分类"))
-  );
+  const categories = Array.from(new Set(videos.map((v) => v.category || "未分类")));
 
   return (
-    <main className="min-h-screen bg-slate-100 px-6 py-10 text-slate-900">
-      <section className="mx-auto max-w-5xl space-y-8">
-        <div className="rounded-3xl bg-white p-8 shadow-sm">
+    <main className="min-h-screen bg-slate-100 px-4 py-8 text-slate-900 md:px-6 md:py-10">
+      <section className="mx-auto max-w-5xl space-y-6">
+
+        {/* Header */}
+        <div className="rounded-3xl bg-white p-5 shadow-sm md:p-8">
           <p className="text-sm text-slate-400">后台管理 / 视频素材管理</p>
-
-          <h1 className="mt-5 text-3xl font-bold text-blue-700">
-            视频素材管理
-          </h1>
-
-          <p className="mt-3 text-slate-500">
-            上传和管理客户端教程视频，支持按分类整理，上传后立即在教程页显示。
+          <h1 className="mt-4 text-2xl font-bold text-blue-700 md:text-3xl">视频素材管理</h1>
+          <p className="mt-2 text-sm text-slate-500">
+            视频直接上传到阿里云 OSS，支持大文件，不受服务器超时限制。
           </p>
-
-          <div className="mt-6 flex flex-wrap gap-4">
-            <a
-              href="/admin"
-              className="rounded-xl border border-slate-200 bg-white px-6 py-3 font-bold text-slate-700"
-            >
+          <div className="mt-5 flex flex-wrap gap-3">
+            <a href="/admin" className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-bold text-slate-700">
               返回后台
             </a>
-
-            <a
-              href="/tutorials"
-              target="_blank"
-              className="rounded-xl border border-blue-200 bg-white px-6 py-3 font-bold text-blue-600"
-            >
+            <a href="/tutorials" target="_blank" className="rounded-xl border border-blue-200 bg-white px-5 py-2.5 text-sm font-bold text-blue-600">
               预览教程页
             </a>
           </div>
         </div>
 
-        <div className="rounded-3xl bg-white p-8 shadow-sm">
-          <h2 className="text-xl font-bold text-slate-900">上传新视频</h2>
+        {/* Upload form */}
+        <div className="rounded-3xl bg-white p-5 shadow-sm md:p-8">
+          <h2 className="text-lg font-bold text-slate-900 md:text-xl">上传新视频</h2>
 
-          {uploadResult && (
-            <div
-              className={`mt-5 rounded-2xl p-4 ${
-                uploadResult.success
-                  ? "bg-green-50 text-green-700"
-                  : "bg-red-50 text-red-700"
-              }`}
-            >
-              <p className="font-bold">{uploadResult.message}</p>
+          {/* Result / progress */}
+          {uploadPhase !== "idle" && (
+            <div className={`mt-5 rounded-2xl p-4 ${
+              uploadPhase === "done"  ? "bg-green-50"
+              : uploadPhase === "error" ? "bg-red-50"
+              : "bg-blue-50"
+            }`}>
+              <p className={`text-sm font-bold ${
+                uploadPhase === "done"  ? "text-green-700"
+                : uploadPhase === "error" ? "text-red-700"
+                : "text-blue-700"
+              }`}>
+                {uploadMessage}
+              </p>
+
+              {uploadPhase === "uploading" && (
+                <div className="mt-3">
+                  <div className="h-2.5 w-full rounded-full bg-blue-100">
+                    <div
+                      className="h-2.5 rounded-full bg-blue-500 transition-all duration-200"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                  <p className="mt-1 text-right text-xs text-blue-500">{uploadProgress}%</p>
+                </div>
+              )}
+
+              {uploadPhase === "done" && (
+                <button
+                  onClick={() => { setUploadPhase("idle"); setUploadMessage(""); }}
+                  className="mt-3 text-xs font-bold text-green-600 underline"
+                >
+                  继续上传
+                </button>
+              )}
             </div>
           )}
 
-          <div className="mt-6 grid gap-5 md:grid-cols-2">
-            <div>
-              <label className="font-bold text-slate-700">视频标题</label>
-              <input
-                value={form.title}
-                onChange={(e) => setForm({ ...form, title: e.target.value })}
-                placeholder="例如：开机操作教程"
-                className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-blue-500"
-              />
-            </div>
+          {(uploadPhase === "idle" || uploadPhase === "error" || uploadPhase === "done") && (
+            <div className="mt-6 grid gap-5 md:grid-cols-2">
+              <div>
+                <label className="text-sm font-bold text-slate-700">视频标题 *</label>
+                <input
+                  value={form.title}
+                  onChange={(e) => setForm({ ...form, title: e.target.value })}
+                  placeholder="例如：开机操作教程"
+                  className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500"
+                />
+              </div>
 
-            <div>
-              <label className="font-bold text-slate-700">分类</label>
-              <input
-                value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value })}
-                placeholder="例如：开机操作"
-                className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-blue-500"
-              />
-            </div>
+              <div>
+                <label className="text-sm font-bold text-slate-700">分类</label>
+                <input
+                  value={form.category}
+                  onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  placeholder="例如：开机部署"
+                  className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500"
+                />
+              </div>
 
-            <div className="md:col-span-2">
-              <label className="font-bold text-slate-700">描述（可选）</label>
-              <input
-                value={form.description}
-                onChange={(e) =>
-                  setForm({ ...form, description: e.target.value })
-                }
-                placeholder="简短描述视频内容..."
-                className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-blue-500"
-              />
-            </div>
+              <div className="md:col-span-2">
+                <label className="text-sm font-bold text-slate-700">描述（可选）</label>
+                <input
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  placeholder="简短描述视频内容..."
+                  className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500"
+                />
+              </div>
 
-            <div className="md:col-span-2">
-              <label className="font-bold text-slate-700">
-                选择视频文件
-              </label>
-              <p className="mt-1 text-xs text-slate-400">
-                支持 mp4、mov、avi 等格式，手机可从相册选择
-              </p>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="video/mp4,video/quicktime,video/avi,video/x-msvideo,video/webm,video/3gpp,video/3gpp2,video/*,.mp4,.mov,.avi,.webm,.3gp"
-                className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-slate-700 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:font-bold file:text-blue-600"
-              />
+              <div className="md:col-span-2">
+                <label className="text-sm font-bold text-slate-700">选择视频文件</label>
+                <p className="mt-1 text-xs text-slate-400">
+                  支持 mp4、mov、avi 等格式，支持 100 MB 以上大文件，手机可从相册选择
+                </p>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="video/mp4,video/quicktime,video/avi,video/x-msvideo,video/webm,video/3gpp,video/3gpp2,video/*,.mp4,.mov,.avi,.webm,.3gp"
+                  className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:font-bold file:text-blue-600"
+                />
+              </div>
             </div>
-          </div>
+          )}
 
-          <div className="mt-6">
-            <button
-              onClick={uploadVideo}
-              disabled={uploading}
-              className="rounded-xl bg-blue-600 px-6 py-3 font-bold text-white disabled:bg-slate-400"
-            >
-              {uploading ? "上传中..." : "上传视频"}
-            </button>
-          </div>
+          {(uploadPhase === "idle" || uploadPhase === "error") && (
+            <div className="mt-5">
+              <button
+                onClick={uploadVideo}
+                disabled={uploading}
+                className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white disabled:bg-slate-400"
+              >
+                上传视频
+              </button>
+            </div>
+          )}
+
+          {uploading && (
+            <div className="mt-5">
+              <button disabled className="rounded-xl bg-slate-400 px-6 py-3 text-sm font-bold text-white">
+                {uploadPhase === "presigning" ? "获取凭证中..." :
+                 uploadPhase === "uploading"  ? `上传中 ${uploadProgress}%...` :
+                 "写入数据库中..."}
+              </button>
+            </div>
+          )}
         </div>
 
-        <div className="rounded-3xl bg-white p-8 shadow-sm">
+        {/* Video list */}
+        <div className="rounded-3xl bg-white p-5 shadow-sm md:p-6">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <h2 className="text-xl font-bold text-slate-900">
+              <h2 className="text-lg font-bold text-slate-900 md:text-xl">
                 全部视频（{videos.length} 条）
               </h2>
               {categories.length > 0 && (
-                <p className="mt-1 text-sm text-slate-400">
-                  分类：{categories.join("、")}
-                </p>
+                <p className="mt-1 text-xs text-slate-400">分类：{categories.join("、")}</p>
               )}
             </div>
-
-            <button
-              onClick={loadVideos}
-              className="rounded-xl border border-blue-200 bg-white px-5 py-2.5 font-bold text-blue-600"
-            >
+            <button onClick={loadVideos} className="rounded-xl border border-blue-200 bg-white px-4 py-2 text-sm font-bold text-blue-600">
               刷新
             </button>
           </div>
 
           {loading ? (
-            <p className="mt-6 text-slate-500">正在加载视频...</p>
+            <p className="mt-6 text-sm text-slate-400">正在加载视频...</p>
           ) : videos.length === 0 ? (
             <div className="mt-6 rounded-2xl border border-dashed border-slate-300 p-10 text-center">
-              <p className="text-xl font-bold text-slate-700">暂无视频</p>
-              <p className="mt-3 text-slate-500">
-                使用上方表单上传第一个教程视频。
-              </p>
+              <p className="font-bold text-slate-600">暂无视频</p>
+              <p className="mt-2 text-sm text-slate-400">使用上方表单上传第一个教程视频。</p>
             </div>
           ) : (
-            <div className="mt-6 space-y-4">
+            <div className="mt-5 space-y-3">
               {videos.map((video) => (
-                <div
-                  key={video.id}
-                  className="rounded-2xl border border-slate-200 bg-slate-50 p-5"
-                >
+                <div key={video.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
-                      <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-600">
                           {video.category || "未分类"}
                         </span>
-
                         <span className="text-xs text-slate-400">
-                          上传于 {new Date(video.createdAt).toLocaleString()}
+                          {new Date(video.createdAt).toLocaleString()}
                         </span>
                       </div>
-
-                      <p className="mt-3 font-bold text-slate-900">
-                        {video.title}
-                      </p>
-
+                      <p className="mt-2 font-bold text-slate-900">{video.title}</p>
                       {video.description && (
-                        <p className="mt-1 text-sm text-slate-600">
-                          {video.description}
-                        </p>
+                        <p className="mt-1 text-xs text-slate-500">{video.description}</p>
                       )}
-
-                      <p className="mt-2 break-all text-xs text-slate-400">
-                        {video.fileUrl}
-                      </p>
+                      <p className="mt-1 truncate text-xs text-slate-400">{video.fileUrl}</p>
                     </div>
-
-                    <div className="flex shrink-0 flex-col gap-2">
+                    <div className="flex shrink-0 flex-col gap-1.5">
                       <a
                         href={video.fileUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-center text-sm font-bold text-slate-700"
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-center text-xs font-bold text-slate-700"
                       >
                         预览
                       </a>
-
                       <button
                         onClick={() => deleteVideo(video.id, video.title)}
-                        className="rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-bold text-red-600"
+                        className="rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-600"
                       >
                         删除
                       </button>

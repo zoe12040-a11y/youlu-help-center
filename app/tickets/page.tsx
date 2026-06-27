@@ -116,28 +116,47 @@ export default function TicketPage() {
       // Add to list as "uploading"
       setFiles((prev) => [...prev, { id, name: file.name, size: file.size, fileType, previewUrl, serverUrl: null, status: "uploading" }]);
 
-      // Upload immediately
+      // Upload via presigned URL (browser → OSS directly, bypasses Vercel timeout)
       (async () => {
         try {
-          const fd = new FormData();
-          fd.append("file", file);
-          const res = await fetch("/api/upload", { method: "POST", body: fd });
-          const result = await res.json();
+          // Step 1: Get presigned PUT URL from server
+          const presignRes = await fetch("/api/upload/presign", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              filename: file.name,
+              contentType: file.type || "application/octet-stream",
+              fileSize: file.size,
+            }),
+          });
+          const presign = await presignRes.json();
+          if (!presign.success) throw new Error(presign.message || "获取上传凭证失败");
+
+          const { uploadUrl, publicUrl } = presign as { uploadUrl: string; publicUrl: string };
+          const resolvedType = (file.type && file.type !== "application/octet-stream")
+            ? file.type
+            : fileType === "image" ? "image/jpeg" : "video/mp4";
+
+          // Step 2: PUT file directly to OSS
+          const ossRes = await fetch(uploadUrl, {
+            method: "PUT",
+            headers: { "Content-Type": resolvedType },
+            body: file,
+          });
+          if (!ossRes.ok) {
+            throw new Error(`OSS 上传失败（HTTP ${ossRes.status}）`);
+          }
+
+          // Step 3: Mark done with the public URL
           setFiles((prev) =>
-            prev.map((f) =>
-              f.id === id
-                ? result.success
-                  ? { ...f, serverUrl: result.url, status: "done" }
-                  : { ...f, status: "error", errorMsg: result.message }
-                : f
-            )
+            prev.map((f) => f.id === id ? { ...f, serverUrl: publicUrl, status: "done" } : f)
           );
-          if (!result.success) showToast(`上传失败：${file.name} — ${result.message}`);
-        } catch {
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "上传失败";
           setFiles((prev) =>
-            prev.map((f) => (f.id === id ? { ...f, status: "error", errorMsg: "网络错误" } : f))
+            prev.map((f) => (f.id === id ? { ...f, status: "error", errorMsg: msg } : f))
           );
-          showToast(`上传失败：${file.name}`);
+          showToast(`上传失败：${file.name} — ${msg}`);
         }
       })();
     }
