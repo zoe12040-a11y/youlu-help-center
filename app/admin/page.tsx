@@ -158,6 +158,9 @@ export default function AdminPage() {
             <a href="/admin/logs" className="rounded-xl border border-blue-200 bg-white px-5 py-2.5 text-sm font-bold text-blue-600">
               操作日志
             </a>
+            <a href="/admin/settings" className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-bold text-slate-700">
+              个人设置
+            </a>
             <a href="/" className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-bold text-slate-700">
               返回首页
             </a>
@@ -268,12 +271,14 @@ export default function AdminPage() {
         )}
 
         {/* Admin section cards */}
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
           {[
-            { href: "/admin/tickets", icon: "🧾", title: "工单管理", desc: "查看并处理客户售后工单" },
-            { href: "/admin/faq",     icon: "❓", title: "FAQ 管理", desc: "管理常见问题及热门排名" },
-            { href: "/admin/videos",  icon: "🎬", title: "视频管理", desc: "上传教程视频和管理素材" },
-            { href: "/admin/logs",    icon: "📋", title: "操作日志", desc: "查看所有状态变更记录" },
+            { href: "/admin/tickets",  icon: "🧾", title: "工单管理",  desc: "查看并处理客户售后工单" },
+            { href: "/admin/faq",      icon: "❓", title: "FAQ 管理",  desc: "管理常见问题及热门排名" },
+            { href: "/admin/videos",   icon: "🎬", title: "视频管理",  desc: "上传教程视频和管理素材" },
+            { href: "/admin/logs",     icon: "📋", title: "操作日志",  desc: "查看所有状态变更记录" },
+            { href: "/admin/users",    icon: "👤", title: "用户管理",  desc: "管理客户和工程师账号" },
+            { href: "/admin/settings", icon: "🔑", title: "个人设置",  desc: "修改管理员登录密码" },
           ].map((item) => (
             <a key={item.href} href={item.href}
               className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow">

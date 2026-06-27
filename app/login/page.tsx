@@ -3,8 +3,8 @@
 import { useState } from "react";
 
 export default function LoginPage() {
-  const [phone, setPhone] = useState("admin");
-  const [password, setPassword] = useState("123456");
+  const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -65,10 +65,8 @@ export default function LoginPage() {
             </p>
 
             <div className="mt-10 rounded-2xl bg-white/10 p-5">
-              <p className="font-bold">测试账号</p>
-              <p className="mt-3 text-sm text-blue-100">管理员：admin / 123456</p>
-              <p className="mt-2 text-sm text-blue-100">客户：customer / 123456</p>
-              <p className="mt-2 text-sm text-blue-100">工程师：在用户管理页创建</p>
+              <p className="font-bold">如何获取账号？</p>
+              <p className="mt-3 text-sm text-blue-100">请联系您的售后服务团队获取登录账号和初始密码。</p>
             </div>
           </div>
 
