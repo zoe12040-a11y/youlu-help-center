@@ -61,14 +61,16 @@ export async function POST(request: Request) {
 
     console.log(`[video-upload] size=${file.size} type=${file.type} name=${file.name}`);
 
-    const bytes = new Uint8Array(await file.arrayBuffer());
+    // Convert to Buffer — ali-oss requires String/Buffer/ReadableStream
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
 
     // Build OSS object key — sanitise filename to ASCII-safe characters
     const cleanName = file.name.replace(/[^\w\-._]/g, "_");
     const objectKey = `tutorials/${Date.now()}-${cleanName}`;
 
-    // Upload — ali-oss supports files of any size (100 MB+)
-    const fileUrl = await ossUpload(objectKey, bytes, file.type || "video/mp4");
+    // Upload to OSS
+    const fileUrl = await ossUpload(objectKey, buffer, file.type || "video/mp4");
     console.log(`[video-upload] uploaded → ${fileUrl}`);
 
     const video = await prisma.video.create({

@@ -71,11 +71,13 @@ export function ossPresignedPutUrl(
 
 export async function ossUpload(
   objectKey: string,
-  data: Uint8Array,
+  data: Buffer | Uint8Array,
   contentType: string
 ): Promise<string> {
   const client = getOSSClient();
-  const result = await (client as OSS).put(objectKey, data as unknown as Buffer, {
+  // Ensure we pass a proper Buffer — ali-oss rejects plain Uint8Array
+  const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  const result = await (client as OSS).put(objectKey, buffer, {
     mime: contentType,
     headers: { "Content-Type": contentType },
   });
