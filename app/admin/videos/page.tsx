@@ -13,28 +13,36 @@ type Video = {
 
 type UploadPhase = "idle" | "presigning" | "uploading" | "confirming" | "done" | "error";
 
-// XHR-based PUT with progress tracking (fetch doesn't support upload progress)
-function putToOSS(
-  url: string,
+// PUT to OSS with full debug logging
+// Using fetch (not XHR) for cleaner error messages during debugging.
+// Progress tracking removed temporarily to diagnose the upload failure.
+async function putToOSS(
+  presignUrl: string,
   file: File,
   contentType: string,
-  onProgress: (pct: number) => void
+  _onProgress: (pct: number) => void
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
-    };
-    xhr.open("PUT", url);
-    xhr.setRequestHeader("Content-Type", contentType);
-    xhr.onload = () =>
-      xhr.status >= 200 && xhr.status < 300
-        ? resolve()
-        : reject(new Error(`OSS 返回 ${xhr.status}：${xhr.responseText.slice(0, 200)}`));
-    xhr.onerror = () => reject(new Error("网络错误，请检查连接"));
-    xhr.ontimeout = () => reject(new Error("上传超时"));
-    xhr.send(file);
+  console.log("uploading to:", presignUrl);
+  console.log("file:", { name: file.name, size: file.size, type: file.type });
+  console.log("Content-Type header:", contentType);
+
+  // Only set Content-Type — no Authorization, no extra headers
+  // OSS presigned URL handles auth via query params (OSSAccessKeyId + Signature)
+  const uploadRes = await fetch(presignUrl, {
+    method: "PUT",
+    body: file,
+    headers: {
+      "Content-Type": contentType,
+    },
   });
+
+  console.log("upload status:", uploadRes.status, uploadRes.statusText);
+  const text = await uploadRes.text();
+  console.log("upload response:", text);
+
+  if (!uploadRes.ok) {
+    throw new Error(`OSS 返回 ${uploadRes.status} ${uploadRes.statusText}：${text.slice(0, 300)}`);
+  }
 }
 
 export default function AdminVideosPage() {
