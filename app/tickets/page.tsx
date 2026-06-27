@@ -24,8 +24,18 @@ function formatBytes(bytes: number): string {
 }
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif"];
-const VIDEO_TYPES = ["video/mp4", "video/quicktime"];
-const ACCEPT = ".jpg,.jpeg,.png,.gif,.mp4,.mov,image/jpeg,image/png,image/gif,video/mp4,video/quicktime";
+const VIDEO_TYPES = [
+  "video/mp4",
+  "video/quicktime",    // .mov
+  "video/avi",
+  "video/x-msvideo",    // .avi
+  "video/webm",
+  "video/3gpp",         // Android common
+  "video/3gpp2",
+  "application/octet-stream", // fallback for some mobile browsers
+];
+// No capture attribute — let user choose from gallery or camera freely
+const ACCEPT = "image/jpeg,image/png,image/gif,video/mp4,video/quicktime,video/avi,video/x-msvideo,video/webm,video/3gpp,video/3gpp2,.jpg,.jpeg,.png,.gif,.mp4,.mov,.avi,.webm,.3gp";
 const MAX_IMAGES = 5;
 const MAX_VIDEOS = 2;
 

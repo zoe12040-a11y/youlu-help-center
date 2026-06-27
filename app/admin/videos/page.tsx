@@ -216,12 +216,15 @@ export default function AdminVideosPage() {
 
             <div className="md:col-span-2">
               <label className="font-bold text-slate-700">
-                选择视频文件（仅支持 .mp4）
+                选择视频文件
               </label>
+              <p className="mt-1 text-xs text-slate-400">
+                支持 mp4、mov、avi 等格式，手机可从相册选择
+              </p>
               <input
                 ref={fileRef}
                 type="file"
-                accept=".mp4,video/mp4"
+                accept="video/mp4,video/quicktime,video/avi,video/x-msvideo,video/webm,video/3gpp,video/3gpp2,video/*,.mp4,.mov,.avi,.webm,.3gp"
                 className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-slate-700 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:font-bold file:text-blue-600"
               />
             </div>
