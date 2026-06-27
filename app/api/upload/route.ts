@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { ossUpload } from "../../../lib/oss";
 
+// Allow up to 300 s for large file uploads (App Router timeout)
+export const maxDuration = 300;
+
 const ALLOWED: Record<string, { ext: string; fileType: "image" | "video" }> = {
   "image/jpeg":       { ext: ".jpg", fileType: "image" },
   "image/png":        { ext: ".png", fileType: "image" },

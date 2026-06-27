@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { ossUpload, ossPublicUrl } from "../../../../lib/oss";
 import { prisma } from "../../../../lib/prisma";
 
+// Allow up to 300 s for large video uploads (App Router timeout)
+export const maxDuration = 300;
+
 const ACCEPTED_VIDEO_TYPES = new Set([
   "video/mp4",
   "video/quicktime",
