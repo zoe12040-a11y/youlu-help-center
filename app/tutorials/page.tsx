@@ -305,6 +305,24 @@ export default function TutorialsPage() {
                 ? `${activeCategory}（${displayVideos.length} 个视频）`
                 : "视频教程"}
             </h2>
+
+            {/* Category filter dropdown */}
+            <select
+              value={lowerSearch ? "" : (activeCategory ?? "")}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSearch("");
+                setActiveCategory(val === "" ? null : val);
+                setPlayingId(null);
+                Object.values(videoRefs.current).forEach((el) => el?.pause());
+              }}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700"
+            >
+              <option value="">全部分类</option>
+              {allCategories.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
           </div>
 
           <div className="mt-5">
