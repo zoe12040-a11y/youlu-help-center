@@ -110,7 +110,13 @@ async function main() {
   // ── 1. Get existing video URLs from DB ──────────────────────────────────
   const existingVideos = await prisma.video.findMany({ select: { id: true, fileUrl: true, title: true } });
   const existingUrls   = new Set(existingVideos.map((v) => v.fileUrl));
-  const existingTitles = new Set(existingVideos.map((v) => v.title));
+  // Also index by the path suffix after /tutorials/ so that retries after partial
+  // failures don't create duplicates even if the base domain changed.
+  const existingOssPaths = new Set(
+    existingVideos
+      .map((v) => { const m = v.fileUrl.match(/\/tutorials\/(.+)$/); return m ? m[1] : ""; })
+      .filter(Boolean)
+  );
   console.log(`\nDB has ${existingVideos.length} video records.`);
 
   // ── 2. Detect and clean duplicate DB records ────────────────────────────
@@ -154,8 +160,8 @@ async function main() {
     const filename   = path.basename(relPath);
     const title      = titleFromFilename(filename);
 
-    // Skip if this exact URL is already in DB
-    if (existingUrls.has(publicUrl)) {
+    // Skip if exact URL or same path suffix already in DB (prevents duplicate on retry)
+    if (existingUrls.has(publicUrl) || existingOssPaths.has(relPath)) {
       console.log(`  SKIP (already in DB): ${relPath}`);
       skipped++;
       continue;
@@ -182,7 +188,8 @@ async function main() {
       await prisma.video.create({
         data: { title, category, fileUrl: publicUrl, description: "" },
       });
-      existingUrls.add(publicUrl); // prevent re-insert if duplicate file found
+      existingUrls.add(publicUrl);      // guard against duplicate in same run
+      existingOssPaths.add(relPath);    // guard against retry duplicates
       dbAdded++;
     } catch (dbErr) {
       const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
