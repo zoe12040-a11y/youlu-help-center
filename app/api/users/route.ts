@@ -17,28 +17,44 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const { name, phone, password, role } = await request.json();
+    // Parse the full body first so we can access all fields including email
+    const body = await request.json();
+    const { name, phone, password, role, email: rawEmail } = body;
 
-    if (!name || !phone) {
+    console.log("[users/POST] payload:", { name, phone, role, hasPassword: !!password, email: rawEmail });
+
+    if (!name?.trim() || !phone?.trim()) {
       return NextResponse.json({ success: false, message: "名称和账号不能为空" }, { status: 400 });
     }
 
-    const existing = await prisma.user.findUnique({ where: { phone } });
+    const existing = await prisma.user.findUnique({ where: { phone: phone.trim() } });
     if (existing) {
-      return NextResponse.json({ success: false, message: "该账号已存在" }, { status: 400 });
+      return NextResponse.json({ success: false, message: `账号「${phone}」已存在，请换一个账号` }, { status: 400 });
     }
 
-    const email = body.email?.trim() || null;
+    const email = rawEmail?.trim() || null;
     const hashedPassword = await bcrypt.hash(password || "123456", 10);
     const user = await prisma.user.create({
-      data: { name, phone, password: hashedPassword, role: role || "customer", isActive: true, email },
+      data: { name: name.trim(), phone: phone.trim(), password: hashedPassword, role: role || "customer", isActive: true, email },
       select: { id: true, name: true, phone: true, role: true, isActive: true, email: true, createdAt: true },
     });
 
+    console.log("[users/POST] created user id:", user.id);
     return NextResponse.json({ success: true, message: "账号创建成功", data: user });
   } catch (error) {
-    console.error("创建用户失败：", error);
-    return NextResponse.json({ success: false, message: "创建用户失败" }, { status: 500 });
+    // Surface the real error message for easier debugging
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("[users/POST] error:", msg, error);
+
+    // Prisma unique constraint violation (phone already taken despite pre-check)
+    if (msg.includes("Unique constraint") || msg.includes("P2002")) {
+      return NextResponse.json({ success: false, message: "该账号已存在（唯一性冲突）" }, { status: 400 });
+    }
+
+    return NextResponse.json(
+      { success: false, message: `创建失败：${msg}` },
+      { status: 500 }
+    );
   }
 }
 
