@@ -38,7 +38,7 @@ export default async function TutorialReturnPage() {
                   </p>
                   <video
                     controls
-                    preload="metadata"
+                    preload="none"
                     className="w-full rounded-2xl bg-black"
                     src={video.url}
                   >

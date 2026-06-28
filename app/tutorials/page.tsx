@@ -400,28 +400,24 @@ function VideoCard({ video, onPlay, videoRef }: VideoCardProps) {
             src={video.fileUrl}
             controls
             autoPlay
-            preload="metadata"
+            preload="none"
             className="aspect-video w-full"
             onPlay={onPlay}
           />
         ) : (
-          <div className="relative">
-            <video
-              ref={videoRef}
-              src={video.fileUrl}
-              preload="metadata"
-              className="aspect-video w-full object-cover opacity-80"
-            />
+          /* Thumbnail: no video tag → zero network load until user clicks */
+          <div className="relative aspect-video flex items-center justify-center bg-slate-800">
+            <video ref={videoRef} preload="none" className="hidden" />
             <button
               onClick={handlePlayClick}
-              className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/30 transition hover:bg-black/40"
+              className="absolute inset-0 flex flex-col items-center justify-center gap-3 transition hover:bg-white/5"
             >
-              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/90 text-blue-600 shadow-lg transition group-hover:scale-105">
-                <svg className="ml-1 h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+              <span className="flex h-14 w-14 items-center justify-center rounded-full bg-white/90 text-blue-600 shadow-lg transition group-hover:scale-110">
+                <svg className="ml-1 h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M8 5v14l11-7z" />
                 </svg>
               </span>
-              <span className="text-xs font-bold text-white drop-shadow">点击播放</span>
+              <span className="text-xs font-bold text-white/80 drop-shadow">点击播放</span>
             </button>
           </div>
         )}
