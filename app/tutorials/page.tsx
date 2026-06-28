@@ -17,7 +17,7 @@ type Faq = {
   category: string;
 };
 
-// ── Primary tutorial categories (cards + detail pages) ─────────────────────
+// Primary categories with links to dedicated step-by-step tutorial pages
 const PRIMARY_CARDS = [
   { title: "开机 & 部署", dbCategory: "开机部署",  href: "/tutorials/start"    },
   { title: "充电操作",    dbCategory: "充电操作",  href: "/tutorials/charging" },
@@ -27,16 +27,16 @@ const PRIMARY_CARDS = [
   { title: "返航操作",   dbCategory: "返航操作",  href: "/tutorials/return"   },
 ];
 
+const PRIMARY_CATEGORY_NAMES = PRIMARY_CARDS.map((c) => c.dbCategory);
 const HOT_WORDS = ["充电异常", "无法开机", "任务下发", "APP 连接", "返航", "加水"];
-
-// ─────────────────────────────────────────────────────────────────────────────
 
 export default function TutorialsPage() {
   const [videos, setVideos] = useState<Video[]>([]);
   const [faqs, setFaqs] = useState<Faq[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [activeCategory, setActiveCategory] = useState("全部");
+  // null = no category selected (default: show no videos)
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<number | null>(null);
   const videoRefs = useRef<Record<number, HTMLVideoElement | null>>({});
   const [isAdmin, setIsAdmin] = useState(false);
@@ -53,7 +53,7 @@ export default function TutorialsPage() {
     try {
       const res = await fetch(`/api/videos/${id}`, { method: "DELETE" });
       const r   = await res.json();
-      if (r.success) { setVideos((prev) => prev.filter((v) => v.id !== id)); }
+      if (r.success) setVideos((prev) => prev.filter((v) => v.id !== id));
       else alert(`删除失败：${r.message}`);
     } catch { alert("删除失败，请检查网络"); }
     setDeletingId(null);
@@ -77,7 +77,31 @@ export default function TutorialsPage() {
   // ── Derived state ──────────────────────────────────────────────────────────
   const lowerSearch = search.trim().toLowerCase();
 
-  // FAQ matches (search mode only)
+  // Categories from DB, split into primary + extra
+  const dbOnlyCategories = Array.from(new Set(videos.map((v) => v.category)))
+    .filter((c) => !PRIMARY_CATEGORY_NAMES.includes(c))
+    .sort();
+  // All categories for the filter UI: primary first, then extras from DB
+  const allCategories = [...PRIMARY_CATEGORY_NAMES, ...dbOnlyCategories];
+
+  // Videos to show:
+  // - Search active: show matching videos regardless of category
+  // - Category selected: show that category's videos
+  // - Neither: show nothing (user must pick a category)
+  const displayVideos = (() => {
+    if (lowerSearch)
+      return videos.filter(
+        (v) =>
+          v.title.toLowerCase().includes(lowerSearch) ||
+          v.category.toLowerCase().includes(lowerSearch) ||
+          v.description.toLowerCase().includes(lowerSearch)
+      );
+    if (activeCategory !== null)
+      return videos.filter((v) => v.category === activeCategory);
+    return []; // no selection → no videos
+  })();
+
+  // FAQ search results
   const matchedFaqs = lowerSearch
     ? faqs.filter(
         (f) =>
@@ -87,67 +111,42 @@ export default function TutorialsPage() {
       )
     : [];
 
-  // Video list: search takes priority, then category filter
-  const displayVideos = (() => {
-    if (lowerSearch)
-      return videos.filter(
-        (v) =>
-          v.title.toLowerCase().includes(lowerSearch) ||
-          v.category.toLowerCase().includes(lowerSearch) ||
-          v.description.toLowerCase().includes(lowerSearch)
-      );
-    if (activeCategory !== "全部")
-      return videos.filter((v) => v.category === activeCategory);
-    return videos;
-  })();
-
-  // Always show 6 primary categories + any extra categories from DB
-  const PRIMARY_CATEGORY_NAMES = PRIMARY_CARDS.map((c) => c.dbCategory);
-  const dbOnlyCategories = Array.from(new Set(videos.map((v) => v.category)))
-    .filter((c) => !PRIMARY_CATEGORY_NAMES.includes(c))
-    .sort();
-  const allCategories = [...PRIMARY_CATEGORY_NAMES, ...dbOnlyCategories];
-
   function selectCategory(cat: string) {
-    setActiveCategory(cat);
+    // Clicking the active category deselects it (back to "no selection")
+    setActiveCategory((prev) => (prev === cat ? null : cat));
     setSearch("");
     setPlayingId(null);
-    // Pause any playing video
     Object.values(videoRefs.current).forEach((el) => el?.pause());
   }
 
-  function handleCardClick(dbCategory: string) {
-    // Toggle: clicking the active category resets to 全部
-    selectCategory(activeCategory === dbCategory ? "全部" : dbCategory);
-  }
-
   function handlePlay(id: number) {
-    // Pause the previously playing video
     if (playingId !== null && playingId !== id) {
       videoRefs.current[playingId]?.pause();
     }
     setPlayingId(id);
   }
 
+  const nothingSelected = !lowerSearch && activeCategory === null;
+
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-8 text-slate-900 md:px-6 md:py-10">
       <section className="mx-auto max-w-7xl space-y-6">
 
-        {/* ── Header ─────────────────────────────────────────────────────── */}
+        {/* ── Header ── */}
         <div className="rounded-3xl bg-white p-5 shadow-sm md:p-8">
           <p className="text-sm text-slate-400">客户中心 / 使用教程</p>
           <h1 className="mt-4 text-2xl font-bold text-blue-700 md:mt-5 md:text-3xl">
             有鹿机器人使用教程
           </h1>
           <p className="mt-3 text-sm leading-7 text-slate-500 md:text-base">
-            查看机器人开机、充电、加水、垃圾倾倒、任务下发、返航等操作教学视频。
+            请选择教程分类，或使用搜索查找具体视频。
           </p>
 
           {/* Search */}
           <div className="mt-5 flex items-center gap-2">
             <input
               value={search}
-              onChange={(e) => { setSearch(e.target.value); setActiveCategory("全部"); }}
+              onChange={(e) => { setSearch(e.target.value); setActiveCategory(null); }}
               placeholder="搜索视频标题、分类或关键词..."
               className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500"
             />
@@ -167,7 +166,7 @@ export default function TutorialsPage() {
             {HOT_WORDS.map((word) => (
               <button
                 key={word}
-                onClick={() => { setSearch(word); setActiveCategory("全部"); }}
+                onClick={() => { setSearch(word); setActiveCategory(null); }}
                 className={`rounded-full border px-3 py-1 text-xs font-bold transition ${
                   search === word
                     ? "border-blue-500 bg-blue-50 text-blue-600"
@@ -192,10 +191,17 @@ export default function TutorialsPage() {
           </div>
         </div>
 
-        {/* ── Primary category cards ──────────────────────────────────────── */}
+        {/* ── Category cards ── */}
         <div className="rounded-3xl bg-white p-5 shadow-sm md:p-6">
-          <h2 className="text-base font-bold text-slate-700 md:text-lg">教程分类</h2>
+          <h2 className="text-base font-bold text-slate-700 md:text-lg">
+            选择教程分类{activeCategory && (
+              <span className="ml-2 text-sm font-normal text-slate-400">
+                — 已选：<span className="font-bold text-blue-600">{activeCategory}</span>
+              </span>
+            )}
+          </h2>
 
+          {/* Primary cards (with detail page links) */}
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6">
             {PRIMARY_CARDS.map((card) => {
               const isActive = activeCategory === card.dbCategory && !lowerSearch;
@@ -203,18 +209,14 @@ export default function TutorialsPage() {
               return (
                 <div
                   key={card.dbCategory}
-                  onClick={() => handleCardClick(card.dbCategory)}
+                  onClick={() => selectCategory(card.dbCategory)}
                   className={`relative cursor-pointer rounded-2xl border p-3 text-center transition hover:-translate-y-0.5 hover:shadow-sm md:p-4 ${
                     isActive
                       ? "border-blue-500 bg-blue-50 shadow-sm"
                       : "border-slate-200 bg-slate-50 hover:border-blue-300"
                   }`}
                 >
-                  <p
-                    className={`text-sm font-bold md:text-base ${
-                      isActive ? "text-blue-700" : "text-slate-800"
-                    }`}
-                  >
+                  <p className={`text-sm font-bold md:text-base ${isActive ? "text-blue-700" : "text-slate-800"}`}>
                     {card.title}
                   </p>
                   {count > 0 && (
@@ -236,18 +238,32 @@ export default function TutorialsPage() {
             })}
           </div>
 
-          {/* Reset button */}
-          {activeCategory !== "全部" && !lowerSearch && (
-            <button
-              onClick={() => selectCategory("全部")}
-              className="mt-3 text-xs font-bold text-slate-400 underline"
-            >
-              显示全部分类
-            </button>
+          {/* Extra DB-only categories as pills */}
+          {dbOnlyCategories.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              <span className="self-center text-xs text-slate-400">更多分类：</span>
+              {dbOnlyCategories.map((cat) => {
+                const isActive = activeCategory === cat && !lowerSearch;
+                const count = videos.filter((v) => v.category === cat).length;
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => selectCategory(cat)}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+                      isActive
+                        ? "border-blue-500 bg-blue-50 text-blue-600"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-blue-300"
+                    }`}
+                  >
+                    {cat}{count > 0 && <span className="ml-1 opacity-60">({count})</span>}
+                  </button>
+                );
+              })}
+            </div>
           )}
         </div>
 
-        {/* ── FAQ results (search mode only) ─────────────────────────────── */}
+        {/* ── FAQ search results ── */}
         {lowerSearch && matchedFaqs.length > 0 && (
           <div className="rounded-3xl bg-white p-5 shadow-sm md:p-6">
             <h2 className="text-base font-bold text-slate-900 md:text-lg">
@@ -279,38 +295,31 @@ export default function TutorialsPage() {
           </div>
         )}
 
-        {/* ── Video list ──────────────────────────────────────────────────── */}
+        {/* ── Video list ── */}
         <div className="rounded-3xl bg-white p-5 shadow-sm md:p-6">
-          {/* List header */}
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-bold text-slate-900 md:text-xl">
-                {lowerSearch
-                  ? `搜索结果：${displayVideos.length} 个视频`
-                  : activeCategory === "全部"
-                  ? `全部视频（${videos.length} 个）`
-                  : `${activeCategory}（${displayVideos.length} 个视频）`}
-              </h2>
-            </div>
-
-            {/* Category dropdown */}
-            <select
-              value={lowerSearch ? "" : activeCategory}
-              onChange={(e) => { selectCategory(e.target.value); }}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700"
-            >
-              <option value="全部">全部分类</option>
-              {allCategories.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
+            <h2 className="text-base font-bold text-slate-900 md:text-xl">
+              {lowerSearch
+                ? `搜索结果：${displayVideos.length} 个视频`
+                : activeCategory !== null
+                ? `${activeCategory}（${displayVideos.length} 个视频）`
+                : "视频教程"}
+            </h2>
           </div>
 
-          {/* Video grid */}
           <div className="mt-5">
             {loading ? (
               <div className="py-12 text-center">
                 <p className="text-sm text-slate-400">正在加载视频...</p>
+              </div>
+            ) : nothingSelected ? (
+              /* Default state: no category selected */
+              <div className="rounded-2xl border border-dashed border-slate-200 py-16 text-center">
+                <p className="text-4xl">👆</p>
+                <p className="mt-4 font-bold text-slate-700">请先选择上方的教程分类</p>
+                <p className="mt-2 text-sm text-slate-400">
+                  点击分类卡片查看该分类下的教学视频，或使用搜索框搜索关键词
+                </p>
               </div>
             ) : displayVideos.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-300 py-16 text-center">
@@ -331,7 +340,6 @@ export default function TutorialsPage() {
                       onPlay={() => handlePlay(video.id)}
                       videoRef={(el) => { videoRefs.current[video.id] = el; }}
                     />
-                    {/* Admin-only delete button */}
                     {isAdmin && (
                       <button
                         onClick={() => adminDeleteVideo(video.id, video.title)}
@@ -349,7 +357,7 @@ export default function TutorialsPage() {
           </div>
         </div>
 
-        {/* No results at all */}
+        {/* No results at all (search) */}
         {lowerSearch && !loading && displayVideos.length === 0 && matchedFaqs.length === 0 && (
           <div className="rounded-3xl bg-white p-8 text-center shadow-sm">
             <p className="font-bold text-slate-700">未找到与「{search}」相关的内容</p>
@@ -385,7 +393,6 @@ function VideoCard({ video, onPlay, videoRef }: VideoCardProps) {
 
   return (
     <div className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md">
-      {/* Video / thumbnail area */}
       <div className="relative bg-slate-900">
         {expanded ? (
           <video
@@ -405,7 +412,6 @@ function VideoCard({ video, onPlay, videoRef }: VideoCardProps) {
               preload="metadata"
               className="aspect-video w-full object-cover opacity-80"
             />
-            {/* Play overlay */}
             <button
               onClick={handlePlayClick}
               className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/30 transition hover:bg-black/40"
@@ -421,7 +427,6 @@ function VideoCard({ video, onPlay, videoRef }: VideoCardProps) {
         )}
       </div>
 
-      {/* Info */}
       <div className="p-4">
         <div className="flex items-center gap-2">
           <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-600">
