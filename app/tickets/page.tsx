@@ -23,21 +23,14 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Ticket attachments: images only (jpg/png/gif, max 4 MB each)
+// Videos are NOT allowed — ask customer to send videos directly to after-sales staff
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif"];
-const VIDEO_TYPES = [
-  "video/mp4",
-  "video/quicktime",    // .mov
-  "video/avi",
-  "video/x-msvideo",    // .avi
-  "video/webm",
-  "video/3gpp",         // Android common
-  "video/3gpp2",
-  "application/octet-stream", // fallback for some mobile browsers
-];
-// No capture attribute — let user choose from gallery or camera freely
-const ACCEPT = "image/jpeg,image/png,image/gif,video/mp4,video/quicktime,video/avi,video/x-msvideo,video/webm,video/3gpp,video/3gpp2,.jpg,.jpeg,.png,.gif,.mp4,.mov,.avi,.webm,.3gp";
+const VIDEO_TYPES: string[] = []; // no videos in tickets
+const ACCEPT = "image/jpeg,image/png,image/gif,.jpg,.jpeg,.png,.gif";
 const MAX_IMAGES = 5;
-const MAX_VIDEOS = 2;
+const MAX_VIDEOS = 0;
+const IMAGE_MAX_BYTES = 4 * 1024 * 1024; // 4 MB
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -84,34 +77,36 @@ export default function TicketPage() {
   const processFiles = useCallback(async (picked: FileList | File[]) => {
     const arr = Array.from(picked);
     const imageCount = files.filter((f) => f.fileType === "image").length;
-    const videoCount = files.filter((f) => f.fileType === "video").length;
 
     let imgAdded = 0;
-    let vidAdded = 0;
 
     for (const file of arr) {
       const isImage = IMAGE_TYPES.includes(file.type);
-      const isVideo = VIDEO_TYPES.includes(file.type);
 
-      if (!isImage && !isVideo) {
-        showToast(`跳过不支持的文件：${file.name}（仅支持 jpg/png/gif/mp4/mov）`);
+      // Reject videos with a clear message
+      const isVideoByType = file.type.startsWith("video/") || /\.(mp4|mov|avi|webm|3gp)$/i.test(file.name);
+      if (isVideoByType) {
+        showToast(`不支持上传视频（${file.name}）。如需提供视频，请直接发送给售后人员。`);
         continue;
       }
-      if (isImage && imageCount + imgAdded >= MAX_IMAGES) {
+      if (!isImage) {
+        showToast(`跳过不支持的文件：${file.name}（仅支持 jpg、png、gif 图片）`);
+        continue;
+      }
+      if (imageCount + imgAdded >= MAX_IMAGES) {
         showToast(`最多上传 ${MAX_IMAGES} 张图片`);
         continue;
       }
-      if (isVideo && videoCount + vidAdded >= MAX_VIDEOS) {
-        showToast(`最多上传 ${MAX_VIDEOS} 个视频`);
+      if (file.size > IMAGE_MAX_BYTES) {
+        showToast(`图片过大：${file.name}（最大 4 MB，当前 ${(file.size / 1024 / 1024).toFixed(1)} MB）`);
         continue;
       }
 
       const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const previewUrl = URL.createObjectURL(file);
-      const fileType: "image" | "video" = isImage ? "image" : "video";
+      const fileType: "image" | "video" = "image"; // only images allowed
 
-      if (isImage) imgAdded++;
-      else vidAdded++;
+      imgAdded++;
 
       // Add to list as "uploading"
       setFiles((prev) => [...prev, { id, name: file.name, size: file.size, fileType, previewUrl, serverUrl: null, status: "uploading" }]);
@@ -359,9 +354,10 @@ export default function TicketPage() {
 
         {/* Upload zone */}
         <div className="rounded-3xl bg-white p-5 shadow-sm md:p-8">
-          <h2 className="text-base font-bold text-slate-700 md:text-lg">附件上传</h2>
+          <h2 className="text-base font-bold text-slate-700 md:text-lg">附件上传（仅限图片）</h2>
           <p className="mt-1 text-xs text-slate-400">
-            图片（jpg/png/gif，最多 {MAX_IMAGES} 张） · 视频（mp4/mov，最多 {MAX_VIDEOS} 个）
+            支持 jpg、png、gif，每张最大 4 MB，最多 {MAX_IMAGES} 张。
+            如需提供视频请直接发送给售后人员。
           </p>
 
           {/* Drop zone */}

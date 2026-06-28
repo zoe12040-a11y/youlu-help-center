@@ -1,20 +1,16 @@
 import { NextResponse } from "next/server";
 import { ossPresignedPutUrl, ossPublicUrl } from "../../../../lib/oss";
 
-const IMAGE_MAX = 20 * 1024 * 1024;   // 20 MB
-const VIDEO_MAX = 500 * 1024 * 1024;  // 500 MB
+// Ticket attachments: images only (max 4 MB). Videos are NOT allowed.
+const IMAGE_MAX = 4 * 1024 * 1024;    // 4 MB
 
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif"]);
 
-const VIDEO_EXTS = new Set([".mp4", ".mov", ".avi", ".webm", ".3gp", ".3g2"]);
 const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".gif"]);
 
 const EXT_MAP: Record<string, string> = {
   ".jpg": ".jpg", ".jpeg": ".jpg",
   ".png": ".png", ".gif": ".gif",
-  ".mp4": ".mp4", ".mov": ".mov",
-  ".avi": ".avi", ".webm": ".webm",
-  ".3gp": ".3gp", ".3g2": ".3g2",
 };
 
 /** POST /api/upload/presign
@@ -31,35 +27,36 @@ export async function POST(request: Request) {
 
     const ext = (filename.match(/\.[^.]+$/) ?? [""])[0].toLowerCase();
 
-    // Determine file type: image or video
+    // Ticket attachments: IMAGES ONLY — reject videos explicitly
+    const isVideo = contentType?.startsWith("video/") || /\.(mp4|mov|avi|webm|3gp)$/i.test(filename);
+    if (isVideo) {
+      return NextResponse.json(
+        { success: false, message: "工单附件不支持上传视频，如需提供视频请直接发送给售后人员" },
+        { status: 400 }
+      );
+    }
+
     const isImage = IMAGE_TYPES.has(contentType) || IMAGE_EXTS.has(ext);
-    const isVideo = VIDEO_EXTS.has(ext) ||
-      (contentType?.startsWith("video/") && contentType !== "video/") ||
-      contentType === "application/octet-stream" && VIDEO_EXTS.has(ext);
-
-    if (!isImage && !isVideo) {
+    if (!isImage) {
       return NextResponse.json(
-        { success: false, message: `不支持的文件类型（${contentType || ext}）` },
+        { success: false, message: `不支持的文件类型（仅支持 jpg、png、gif 图片）` },
         { status: 400 }
       );
     }
 
-    const fileType: "image" | "video" = isImage ? "image" : "video";
-    const maxBytes = fileType === "image" ? IMAGE_MAX : VIDEO_MAX;
-
-    if (fileSize && fileSize > maxBytes) {
-      const limitMB = maxBytes / 1024 / 1024;
+    if (fileSize && fileSize > IMAGE_MAX) {
       return NextResponse.json(
-        { success: false, message: `文件超过大小限制（最大 ${limitMB} MB）` },
+        { success: false, message: `图片过大（最大 4 MB，当前 ${(fileSize / 1024 / 1024).toFixed(1)} MB）` },
         { status: 400 }
       );
     }
 
+    const fileType: "image" | "video" = "image";
     // Resolve extension and content type
-    const safeExt     = EXT_MAP[ext] ?? (fileType === "image" ? ".jpg" : ".mp4");
+    const safeExt     = EXT_MAP[ext] ?? ".jpg";
     const resolvedType = (contentType && contentType !== "application/octet-stream")
       ? contentType
-      : fileType === "image" ? "image/jpeg" : "video/mp4";
+      : "image/jpeg";
 
     // Build safe object key
     const rand      = Math.random().toString(36).slice(2, 8);
